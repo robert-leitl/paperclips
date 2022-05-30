@@ -1,5 +1,10 @@
 import { mat4, quat, vec2, vec3 } from 'gl-matrix';
+import { GLBBuilder } from './utils/glb-builder';
 import { createAndSetupTexture, createFramebuffer, createProgram, makeBuffer, makeVertexArray, resizeCanvasToDisplaySize, setFramebuffer } from './utils/webgl-utils';
+
+import tubeVertShaderSource from './shader/tube.vert';
+import tubeFragShaderSource from './shader/tube.frag';
+import { ArcballControl } from './utils/arcball-control';
 
 export class Paperclips {
     oninit;
@@ -11,9 +16,9 @@ export class Paperclips {
 
     camera = {
         matrix: mat4.create(),
-        near: 60,
-        far: 155,
-        distance: 100,
+        near: 3,
+        far: 10,
+        distance: 5,
         orbit: quat.create(),
         position: vec3.create(),
         rotation: vec3.create(),
@@ -49,6 +54,13 @@ export class Paperclips {
         this.#deltaTime = Math.min(32, time - this.#time);
         this.#time = time;
 
+        this.control.update(this.#deltaTime);
+        mat4.fromQuat(this.drawUniforms.worldMatrix, this.control.rotationQuat);
+
+        // update the world inverse transpose
+        mat4.invert(this.drawUniforms.worldInverseTransposeMatrix, this.drawUniforms.worldMatrix);
+        mat4.transpose(this.drawUniforms.worldInverseTransposeMatrix, this.drawUniforms.worldInverseTransposeMatrix);
+
         if (this.animate)
             this.#frames += this.#deltaTime / 16;
 
@@ -64,13 +76,30 @@ export class Paperclips {
     #render() {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
+
+
+        gl.useProgram(this.tubeProgram);
+
+        gl.enable(gl.CULL_FACE);
+        gl.enable(gl.DEPTH_TEST);
+
+        gl.uniformMatrix4fv(this.tubeLocations.uViewMatrix, false, this.drawUniforms.viewMatrix);
+        gl.uniformMatrix4fv(this.tubeLocations.uProjectionMatrix, false, this.drawUniforms.projectionMatrix);
+        gl.uniform3f(this.tubeLocations.uCameraPosition, this.camera.position[0], this.camera.position[1], this.camera.position[2]);
+        gl.uniformMatrix4fv(this.tubeLocations.uWorldMatrix, false, this.drawUniforms.worldMatrix);
+        gl.uniformMatrix4fv(this.tubeLocations.uWorldInverseTransposeMatrix, false, this.drawUniforms.worldInverseTransposeMatrix);
+        gl.uniform1f(this.tubeLocations.uFrames, this.#frames);
+
+        gl.bindVertexArray(this.tubeVAO);
+        gl.drawElements(gl.TRIANGLES, this.tubeBuffers.indices.length, gl.UNSIGNED_SHORT, 0);
+
     }
 
     destroy() {
         this.#isDestroyed = true;
     }
 
-    #init() {
+    async #init() {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
         /** @type {WebGLRenderingContext} */
@@ -85,12 +114,28 @@ export class Paperclips {
             document.body.innerHTML = "This example requires EXT_color_buffer_float which is unavailable on this system."
         }
 
+        ///////////////////////////////////  LOAD RESOURCES
+
+        const glbBuilder = new GLBBuilder(gl);
+        await glbBuilder.load(new URL('./assets/models/tube.glb', import.meta.url));
+        console.log(glbBuilder);
+
         ///////////////////////////////////  PROGRAM SETUP
 
         // setup programs
-        
+        this.tubeProgram = createProgram(gl, [tubeVertShaderSource, tubeFragShaderSource], null, { aModelPosition: 0, aModelNormal: 1 });
+
         // find the locations
-        
+        this.tubeLocations = {
+            aModelPosition: gl.getAttribLocation(this.tubeProgram, 'aModelPosition'),
+            aModelNormal: gl.getAttribLocation(this.tubeProgram, 'aModelNormal'),
+            uWorldMatrix: gl.getUniformLocation(this.tubeProgram, 'uWorldMatrix'),
+            uViewMatrix: gl.getUniformLocation(this.tubeProgram, 'uViewMatrix'),
+            uProjectionMatrix: gl.getUniformLocation(this.tubeProgram, 'uProjectionMatrix'),
+            uWorldInverseTransposeMatrix: gl.getUniformLocation(this.tubeProgram, 'uWorldInverseTransposeMatrix'),
+            uCameraPosition: gl.getUniformLocation(this.tubeProgram, 'uCameraPosition'),
+            uFrames: gl.getUniformLocation(this.tubeProgram, 'uFrames')
+        };
         
         // setup uniforms
         this.drawUniforms = {
@@ -103,6 +148,14 @@ export class Paperclips {
         };
 
         /////////////////////////////////// GEOMETRY / MESH SETUP
+
+        // create tube VAO
+        this.tubePrimitive = glbBuilder.primitives.find(item => item.meshName == 'tube-simplified');
+        this.tubeBuffers = this.tubePrimitive.buffers;
+        this.tubeVAO = makeVertexArray(gl, [
+            [this.tubeBuffers.vertices.data, 0, this.tubeBuffers.vertices.numberOfComponents],
+            [this.tubeBuffers.normals.data, 1, this.tubeBuffers.normals.numberOfComponents]
+        ], this.tubeBuffers.indices.data);
 
         // create quad VAO
         const quadPositions = [-1, -1, 3, -1, -1, 3];
@@ -117,6 +170,9 @@ export class Paperclips {
         // initial client dimensions
         const clientSize = vec2.fromValues(gl.canvas.clientWidth, gl.canvas.clientHeight);
         this.drawBufferSize = vec2.clone(clientSize);
+        
+        // init the pointer rotate control
+        this.control = new ArcballControl(this.canvas);
 
         this.resize();
 

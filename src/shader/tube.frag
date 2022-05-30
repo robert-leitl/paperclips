@@ -1,0 +1,37 @@
+#version 300 es
+
+precision highp float;
+
+uniform float uFrames;
+uniform vec3 uCameraPosition;
+
+in vec3 vWorldPosition;
+in vec3 vWorldNormal;
+
+out vec4 outColor;
+
+void main() {
+    vec4 lightColor = vec4(1., 1., 0., 0.);
+    vec3 lightDirection = vec3(0., .5, 4.);
+
+    vec3 P = vWorldPosition;
+    vec3 N = normalize(vWorldNormal);
+    vec3 V = normalize(uCameraPosition - P);
+    vec3 L = normalize(lightDirection);
+    vec3 H = normalize(V + N);
+    float NdL = max(0., dot(N, L));
+
+    // specular term
+    float specular = pow(max(0., max(0., dot(H, L))), 100.);
+
+    // diffuse term
+    float diffuse = NdL;
+
+    // ambient light color
+    vec4 ambient = vec4(0.1);
+    
+    // the material albedo color
+    vec4 albedo = vec4(0.);
+
+    outColor = albedo + ambient + lightColor * diffuse + vec4(specular);
+}

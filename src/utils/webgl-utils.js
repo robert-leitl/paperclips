@@ -41,7 +41,7 @@ export function createProgram(gl, shaderSources, transformFeedbackVaryings, attr
     gl.deleteProgram(program);
 }
 
-export function makeVertexArray(gl, bufLocNumElmPairs, indices) {
+export function makeVertexArray(gl, bufLocNumElmPairs, indicesBuffer) {
     const va = gl.createVertexArray();
     gl.bindVertexArray(va);
     for (const [buffer, loc, numElem] of bufLocNumElmPairs) {
@@ -58,10 +58,8 @@ export function makeVertexArray(gl, bufLocNumElmPairs, indices) {
             0,        // offset
         );
     }
-    if (indices) {
-        const indexBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+    if (indicesBuffer) {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indicesBuffer);
     }
 
     gl.bindVertexArray(null);
