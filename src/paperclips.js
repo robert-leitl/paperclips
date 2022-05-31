@@ -44,6 +44,8 @@ export class Paperclips {
         position: null
     };
 
+    TUBE_SCALE = 2;
+
     resize() {
         const gl = this.gl;
 
@@ -145,7 +147,6 @@ export class Paperclips {
 
         this.glbBuilder = new GLBBuilder(gl);
         await this.glbBuilder.load(new URL('./assets/models/tube.glb', import.meta.url));
-        console.log(this.glbBuilder);
 
         ///////////////////////////////////  Physics INITIALIZATION
 
@@ -219,7 +220,6 @@ export class Paperclips {
 
     #initPhysics() {
         const Ammo = this.Ammo;
-        console.log(Ammo);
 
         // reused to get the transformations of rigid bodies
         this.tmpTrans = new Ammo.btTransform();
@@ -230,7 +230,7 @@ export class Paperclips {
         const solver = new Ammo.btSequentialImpulseConstraintSolver();
 
         this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
-        this.physicsWorld.setGravity(new Ammo.btVector3(0, -20, 0));
+        this.physicsWorld.setGravity(new Ammo.btVector3(0, -80, 0));
 
         // define collision groups to apply raytests only to non-static objects
         const envGroup = 0x01;
@@ -239,8 +239,6 @@ export class Paperclips {
         const defaultMask = envGroup | objGroup;
         const interactiveMask = envGroup | objGroup | rayGroup;
         const rayMask = objGroup | rayGroup;
-
-        console.log('world', this.physicsWorld);
 
         Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
 
@@ -320,7 +318,7 @@ export class Paperclips {
                 
                 // calculate the force vector from the hit ray
                 const force = vec3.normalize(vec3.create(), vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos));
-                vec3.scale(force, force, 1.);
+                vec3.scale(force, force, 3.);
                 this.impulse.force.setX(force[0]);
                 this.impulse.force.setY(force[1]);
                 this.impulse.force.setZ(force[2]);
@@ -361,7 +359,6 @@ export class Paperclips {
         this.tubeProxyShape.calculateLocalInertia(mass, localInertia);
         const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, this.tubeProxyShape, localInertia);
         const tubeBody = new Ammo.btRigidBody(rbInfo);
-        console.log(tubeBody);
         tubeBody.setFriction(1);
         tubeBody.setRestitution(0.6);
 

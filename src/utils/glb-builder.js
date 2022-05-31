@@ -31,7 +31,8 @@ export class GLBBuilder {
         const gl = this.gl;
 
         const indices = GLBBuilder.getAccessorData(glb, primitiveDef.indices);
-        const vertices = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.POSITION);
+        let vertices = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.POSITION);
+        vertices = vertices.map(v => v * 4);
         const normals = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.NORMAL);
 
         if (!indices || !vertices || !normals) return null;
