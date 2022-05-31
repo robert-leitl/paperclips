@@ -8,3 +8,4 @@ Physics simulation using ammo.js and native webgl rendering.
 
 ### Features
 - [ammo.js](https://kripken.github.io/ammo.js/) physics engine
+- Concav rigid body created from low polygon proxy object (glb export from blender)

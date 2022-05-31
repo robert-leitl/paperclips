@@ -225,7 +225,7 @@ export class Paperclips {
         const solver = new Ammo.btSequentialImpulseConstraintSolver();
 
         this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
-        this.physicsWorld.setGravity(new Ammo.btVector3(0, -19.810, 0));
+        this.physicsWorld.setGravity(new Ammo.btVector3(0, -20, 0));
 
         Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
 
@@ -237,7 +237,7 @@ export class Paperclips {
         envGroundTransform.setOrigin(new Ammo.btVector3( 0, 0, 0 ));
         let envGroundRbInfo = new Ammo.btRigidBodyConstructionInfo(0, new Ammo.btDefaultMotionState(envGroundTransform), envGroundShape, new Ammo.btVector3(0, 0, 0));
         let envGroundBody = new Ammo.btRigidBody(envGroundRbInfo);
-        envGroundBody.setRestitution(.7);
+        envGroundBody.setRestitution(1);
         this.physicsWorld.addRigidBody(envGroundBody);
 
         /*let transform = new Ammo.btTransform();
@@ -288,7 +288,7 @@ export class Paperclips {
         const tubeBody = new Ammo.btRigidBody(rbInfo);
         console.log(tubeBody);
         tubeBody.setFriction(0.1);
-        tubeBody.setRestitution(0.7);
+        tubeBody.setRestitution(0.4);
 
         this.rigidBodies.push(tubeBody);
         this.physicsWorld.addRigidBody(tubeBody);
