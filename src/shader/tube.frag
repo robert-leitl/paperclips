@@ -11,8 +11,8 @@ in vec3 vWorldNormal;
 out vec4 outColor;
 
 void main() {
-    vec4 lightColor = vec4(1., 1., 0., 0.);
-    vec3 lightDirection = vec3(0., .5, 4.);
+    vec4 lightColor = vec4(1., 1., 1., 0.);
+    vec3 lightDirection = vec3(0.1, .1, 0.1);
 
     vec3 P = vWorldPosition;
     vec3 N = normalize(vWorldNormal);
@@ -33,5 +33,10 @@ void main() {
     // the material albedo color
     vec4 albedo = vec4(0.);
 
+    // fake occlusion
+    float occlusionFactor = smoothstep(0., .2, vWorldPosition.y) * 0.3 + 0.7;
+
     outColor = albedo + ambient + lightColor * diffuse + vec4(specular);
+
+    outColor *= occlusionFactor;
 }

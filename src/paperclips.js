@@ -1,4 +1,4 @@
-import { mat4, quat, vec2, vec3 } from 'gl-matrix';
+import { mat4, quat, vec2, vec3, vec4 } from 'gl-matrix';
 import { GLBBuilder } from './utils/glb-builder';
 import * as AmmoStartFunc from './libs/ammo';
 import { createAndSetupTexture, createFramebuffer, createProgram, makeBuffer, makeVertexArray, resizeCanvasToDisplaySize, setFramebuffer } from './utils/webgl-utils';
@@ -17,13 +17,14 @@ export class Paperclips {
 
     camera = {
         matrix: mat4.create(),
-        near: 10,
-        far: 50,
-        distance: 20,
+        near: 1,
+        far: 30,
+        fov: Math.PI / 3,
+        distance: 7,
         orbit: quat.create(),
         position: vec3.create(),
         rotation: vec3.create(),
-        up: vec3.fromValues(0, 1, 0)
+        up: vec3.fromValues(0, 0, 1)
     };
 
     animate = true;
@@ -38,6 +39,10 @@ export class Paperclips {
 
     rigidBodies = [];
     tmpTrans = null;
+    impulse = {
+        force: null,
+        position: null
+    };
 
     resize() {
         const gl = this.gl;
@@ -203,7 +208,7 @@ export class Paperclips {
 
         this.resize();
 
-        this.camera.position[2] = this.camera.distance;
+        this.camera.position[1] = -this.camera.distance;
         this.#updateCameraMatrix();
         this.#updateProjectionMatrix(gl);
 
@@ -227,31 +232,26 @@ export class Paperclips {
         this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
         this.physicsWorld.setGravity(new Ammo.btVector3(0, -20, 0));
 
+        // define collision groups to apply raytests only to non-static objects
+        const envGroup = 0x01;
+        const objGroup = 0x02;
+        const rayGroup = 0x04;
+        const defaultMask = envGroup | objGroup;
+        const interactiveMask = envGroup | objGroup | rayGroup;
+        const rayMask = objGroup | rayGroup;
+
+        console.log('world', this.physicsWorld);
+
         Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
 
         // create the environment enclosing box
-        const envGroundShape = new Ammo.btStaticPlaneShape(new Ammo.btVector3(0, 1, 0), -5);
-        envGroundShape.setMargin( 0.05 );
-        const envGroundTransform = new Ammo.btTransform();
-        envGroundTransform.setIdentity();
-        envGroundTransform.setOrigin(new Ammo.btVector3( 0, 0, 0 ));
-        let envGroundRbInfo = new Ammo.btRigidBodyConstructionInfo(0, new Ammo.btDefaultMotionState(envGroundTransform), envGroundShape, new Ammo.btVector3(0, 0, 0));
-        let envGroundBody = new Ammo.btRigidBody(envGroundRbInfo);
-        envGroundBody.setRestitution(1);
-        this.physicsWorld.addRigidBody(envGroundBody);
-
-        /*let transform = new Ammo.btTransform();
-        transform.setIdentity();
-        transform.setOrigin( new Ammo.btVector3( 0, 0, 0 ) );
-        let motionState = new Ammo.btDefaultMotionState( transform );
-        let colShape = new Ammo.btBoxShape( new Ammo.btVector3( 10, 10, 10 ) );
-        colShape.setMargin( 0.05 );
-        let localInertia = new Ammo.btVector3( 0, 0, 0 );
-        colShape.calculateLocalInertia( 1, localInertia );
-        let rbInfo = new Ammo.btRigidBodyConstructionInfo( 1, motionState, colShape, localInertia );
-        let body = new Ammo.btRigidBody( rbInfo );
-        this.rigidBodies.push(body);
-        this.physicsWorld.addRigidBody(body);*/
+        const boundsOffset = 5;
+        this.#addStaticPlaneShape(vec3.fromValues(0, 1, 0), 0, envGroup, defaultMask);
+        this.#addStaticPlaneShape(vec3.fromValues(1, 0, 0), -boundsOffset, envGroup, defaultMask);
+        this.#addStaticPlaneShape(vec3.fromValues(-1, 0, 0), -boundsOffset, envGroup, defaultMask);
+        this.#addStaticPlaneShape(vec3.fromValues(0, 0, 1), -boundsOffset, envGroup, defaultMask);
+        this.#addStaticPlaneShape(vec3.fromValues(0, 0, -1), -boundsOffset, envGroup, defaultMask);
+        this.#addStaticPlaneShape(vec3.fromValues(0, -1, 0), -30, envGroup, defaultMask);
 
         // create the tube collision shape
         const mesh = new Ammo.btTriangleMesh(true, true);
@@ -270,28 +270,103 @@ export class Paperclips {
         this.tubeProxyShape.setMargin(0.01);
         this.tubeProxyShape.updateBound();
 
-        this.#addTube();
+        this.#addTube(objGroup, interactiveMask);
+
+
+        // init interaction event handling
+        this.impulse.force = new Ammo.btVector3(0, 1, 0);
+        this.impulse.position = new Ammo.btVector3(0, 1, 0);
+
+        this.canvas.addEventListener('click', (e) => {
+            const body = this.rigidBodies[0];
+
+            // calculate the clicked point on the far plane
+            const x = (e.clientX / this.canvas.clientWidth) * 2 - 1;
+            const y = (1 - (e.clientY / this.canvas.clientHeight)) * 2 - 1;
+            const z = 1; // at camera far plane
+            const ndcPos = vec3.fromValues(x, y, z); 
+            const viewPos = vec3.transformMat4(vec3.create(), ndcPos, this.drawUniforms.inversProjectionMatrix);
+            const inversViewProjectionMatrix = mat4.multiply(mat4.create(), this.drawUniforms.cameraMatrix, this.drawUniforms.inversProjectionMatrix);
+            const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), inversViewProjectionMatrix);
+            if (worldPos[3] !== 0){
+                vec3.scale(worldPos, worldPos, 1 / worldPos[3]);
+            }
+
+            // test if a rigid body has been hit
+            const rayStartWorldPos = vec3.clone(this.camera.position);
+            const rayStartWorldPosAmmoVec3 = new Ammo.btVector3(rayStartWorldPos[0], rayStartWorldPos[1], rayStartWorldPos[2]);
+            const rayEndWorldPos = worldPos;
+            const rayEndWorldPosAmmoVec3 = new Ammo.btVector3(rayEndWorldPos[0], rayEndWorldPos[1], rayEndWorldPos[2]);
+            const hitResult = new Ammo.ClosestRayResultCallback(rayStartWorldPosAmmoVec3, rayEndWorldPosAmmoVec3);
+            hitResult.m_collisionFilterGroup = rayGroup;
+            hitResult.m_collisionFilterMask = rayMask;
+            this.physicsWorld.rayTest(
+                rayStartWorldPosAmmoVec3, 
+                rayEndWorldPosAmmoVec3, 
+                hitResult
+            );
+
+            if (hitResult.hasHit()) {
+                const hitPos = hitResult.m_hitPointWorld;
+                const hitWorldPos = vec3.fromValues(hitPos.x(), hitPos.y(), hitPos.z());
+                // transform to model space
+                const inversModelMatrix = mat4.invert(mat4.create(), this.drawUniforms.worldMatrix);
+                const hitModelPos = vec3.transformMat4(vec3.create(), hitWorldPos, inversModelMatrix);
+
+                // apply the hit position in model space as the impulse rel position
+                this.impulse.position.setX(hitModelPos[0]);
+                this.impulse.position.setY(hitModelPos[1]);
+                this.impulse.position.setZ(hitModelPos[2]);
+                
+                // calculate the force vector from the hit ray
+                const force = vec3.normalize(vec3.create(), vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos));
+                vec3.scale(force, force, 1.);
+                this.impulse.force.setX(force[0]);
+                this.impulse.force.setY(force[1]);
+                this.impulse.force.setZ(force[2]);
+
+                body.activate();
+                body.applyImpulse(this.impulse.force, this.impulse.position);
+            }
+        });
     }
 
-    #addTube() {
+    #addStaticPlaneShape(normal, offset, collisionGroup, collisionMask) {
+        const Ammo = this.Ammo;
+
+        const shape = new Ammo.btStaticPlaneShape(new Ammo.btVector3(normal[0], normal[1], normal[2]), offset);
+        shape.setMargin( 0.01 );
+        const transform = new Ammo.btTransform();
+        transform.setIdentity();
+        let info = new Ammo.btRigidBodyConstructionInfo(
+            0, 
+            new Ammo.btDefaultMotionState(transform), 
+            shape, 
+            new Ammo.btVector3(0, 0, 0)
+        );
+        let body = new Ammo.btRigidBody(info);
+        body.setRestitution(1);
+        this.physicsWorld.addRigidBody(body, collisionGroup, collisionMask);
+    }
+
+    #addTube(collisionGroup, collisionMask) {
         const Ammo = this.Ammo;
 
         const mass = 0.1;
         const transform = new Ammo.btTransform();
         transform.setIdentity();
-        transform.setOrigin(new Ammo.btVector3(0, 0, 0));
-        transform.setRotation(new Ammo.btQuaternion(0.0, -0.0, 0.5, 0.4999999701976776));
+        transform.setOrigin(new Ammo.btVector3(0, 5, 0));
         const motionState = new Ammo.btDefaultMotionState(transform);
         const localInertia = new Ammo.btVector3(0, 0, 0);
         this.tubeProxyShape.calculateLocalInertia(mass, localInertia);
         const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, this.tubeProxyShape, localInertia);
         const tubeBody = new Ammo.btRigidBody(rbInfo);
         console.log(tubeBody);
-        tubeBody.setFriction(0.1);
-        tubeBody.setRestitution(0.4);
+        tubeBody.setFriction(1);
+        tubeBody.setRestitution(0.6);
 
         this.rigidBodies.push(tubeBody);
-        this.physicsWorld.addRigidBody(tubeBody);
+        this.physicsWorld.addRigidBody(tubeBody, collisionGroup, collisionMask);
     }
 
     #resizeTextures(gl) {
@@ -329,7 +404,8 @@ export class Paperclips {
 
     #updateProjectionMatrix(gl) {
         const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-        mat4.perspective(this.drawUniforms.projectionMatrix, Math.PI / 4, aspect, this.camera.near, this.camera.far);
+        mat4.perspective(this.drawUniforms.projectionMatrix, this.camera.fov, aspect, this.camera.near, this.camera.far);
+        mat4.invert(this.drawUniforms.inversProjectionMatrix, this.drawUniforms.projectionMatrix);
     }
 
     initTweakpane() {
