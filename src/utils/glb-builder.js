@@ -52,14 +52,16 @@ export class GLBBuilder {
         const buffers = {
 
             indices: {
-                data: indicesBuffer,
+                data: indices,
+                webglBuffer: indicesBuffer,
                 length: indices.length,
                 dataType: GLBBuilder.getAccessorDataType(gl, glb, primitiveDef.indices),
                 numberOfComponents: GLBBuilder.getAccessorNumberOfComponents(glb, primitiveDef.indices)
             },
 
             vertices: {
-                data: verticesBuffer,
+                data: vertices,
+                webglBuffer: verticesBuffer,
                 length: vertices.length,
                 dataType: GLBBuilder.getAccessorDataType(gl, glb, primitiveDef.attributes.POSITION),
                 numberOfComponents: GLBBuilder.getAccessorNumberOfComponents(glb, primitiveDef.attributes.POSITION),
@@ -67,7 +69,8 @@ export class GLBBuilder {
             },
 
             normals: {
-                data: normalsBuffer,
+                data: normals,
+                webglBuffer: normalsBuffer,
                 length: normals.length,
                 dataType: GLBBuilder.getAccessorDataType(gl, glb, primitiveDef.attributes.NORMAL),
                 numberOfComponents: GLBBuilder.getAccessorNumberOfComponents(glb, primitiveDef.attributes.NORMAL),

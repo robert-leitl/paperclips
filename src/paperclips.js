@@ -1,5 +1,6 @@
 import { mat4, quat, vec2, vec3 } from 'gl-matrix';
 import { GLBBuilder } from './utils/glb-builder';
+import * as AmmoStartFunc from './libs/ammo';
 import { createAndSetupTexture, createFramebuffer, createProgram, makeBuffer, makeVertexArray, resizeCanvasToDisplaySize, setFramebuffer } from './utils/webgl-utils';
 
 import tubeVertShaderSource from './shader/tube.vert';
@@ -16,9 +17,9 @@ export class Paperclips {
 
     camera = {
         matrix: mat4.create(),
-        near: 3,
-        far: 10,
-        distance: 5,
+        near: 10,
+        far: 50,
+        distance: 20,
         orbit: quat.create(),
         position: vec3.create(),
         rotation: vec3.create(),
@@ -34,6 +35,9 @@ export class Paperclips {
 
         this.#init();
     }
+
+    rigidBodies = [];
+    tmpTrans = null;
 
     resize() {
         const gl = this.gl;
@@ -54,8 +58,26 @@ export class Paperclips {
         this.#deltaTime = Math.min(32, time - this.#time);
         this.#time = time;
 
-        this.control.update(this.#deltaTime);
-        mat4.fromQuat(this.drawUniforms.worldMatrix, this.control.rotationQuat);
+        // update physics
+        this.physicsWorld.stepSimulation(this.#deltaTime / 1000, 10);
+
+        // Update rigid bodies
+        //for (let i = 0; i < this.rigidBodies.length; i++) {
+            const body = this.rigidBodies[0];
+            const ms = body.getMotionState();
+            if (ms) {
+                ms.getWorldTransform(this.tmpTrans);
+                const p = this.tmpTrans.getOrigin();
+                const q = this.tmpTrans.getRotation();
+                
+                //mat4.translate(this.drawUniforms.worldMatrix, rotMat, vec3.fromValues(p.x(), p.y(), p.z()));
+                //mat4.fromQuat(mat4.create(), quat.fromValues(q.x(), q.y(), q.z(), q.w()));
+                mat4.fromRotationTranslation(this.drawUniforms.worldMatrix, quat.fromValues(q.x(), q.y(), q.z(), q.w()), vec3.fromValues(p.x(), p.y(), p.z()));
+            }
+        //}
+
+        //this.control.update(this.#deltaTime);
+        //mat4.fromQuat(this.drawUniforms.worldMatrix, this.control.rotationQuat);
 
         // update the world inverse transpose
         mat4.invert(this.drawUniforms.worldInverseTransposeMatrix, this.drawUniforms.worldMatrix);
@@ -116,9 +138,14 @@ export class Paperclips {
 
         ///////////////////////////////////  LOAD RESOURCES
 
-        const glbBuilder = new GLBBuilder(gl);
-        await glbBuilder.load(new URL('./assets/models/tube.glb', import.meta.url));
-        console.log(glbBuilder);
+        this.glbBuilder = new GLBBuilder(gl);
+        await this.glbBuilder.load(new URL('./assets/models/tube.glb', import.meta.url));
+        console.log(this.glbBuilder);
+
+        ///////////////////////////////////  Physics INITIALIZATION
+
+        this.Ammo = await AmmoStartFunc();
+        this.#initPhysics();
 
         ///////////////////////////////////  PROGRAM SETUP
 
@@ -150,12 +177,12 @@ export class Paperclips {
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
         // create tube VAO
-        this.tubePrimitive = glbBuilder.primitives.find(item => item.meshName == 'tube-simplified');
+        this.tubePrimitive = this.glbBuilder.primitives.find(item => item.meshName == 'tube-simplified');
         this.tubeBuffers = this.tubePrimitive.buffers;
         this.tubeVAO = makeVertexArray(gl, [
-            [this.tubeBuffers.vertices.data, 0, this.tubeBuffers.vertices.numberOfComponents],
-            [this.tubeBuffers.normals.data, 1, this.tubeBuffers.normals.numberOfComponents]
-        ], this.tubeBuffers.indices.data);
+            [this.tubeBuffers.vertices.webglBuffer, 0, this.tubeBuffers.vertices.numberOfComponents],
+            [this.tubeBuffers.normals.webglBuffer, 1, this.tubeBuffers.normals.numberOfComponents]
+        ], this.tubeBuffers.indices.webglBuffer);
 
         // create quad VAO
         const quadPositions = [-1, -1, 3, -1, -1, 3];
@@ -183,6 +210,88 @@ export class Paperclips {
         this.initTweakpane();
 
         if (this.oninit) this.oninit(this);
+    }
+
+    #initPhysics() {
+        const Ammo = this.Ammo;
+        console.log(Ammo);
+
+        // reused to get the transformations of rigid bodies
+        this.tmpTrans = new Ammo.btTransform();
+
+        const collisionConfiguration = new Ammo.btDefaultCollisionConfiguration();
+        const dispatcher = new Ammo.btCollisionDispatcher(collisionConfiguration);
+        const overlappingPairCache = new Ammo.btDbvtBroadphase();
+        const solver = new Ammo.btSequentialImpulseConstraintSolver();
+
+        this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
+        this.physicsWorld.setGravity(new Ammo.btVector3(0, -19.810, 0));
+
+        Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
+
+        // create the environment enclosing box
+        const envGroundShape = new Ammo.btStaticPlaneShape(new Ammo.btVector3(0, 1, 0), -5);
+        envGroundShape.setMargin( 0.05 );
+        const envGroundTransform = new Ammo.btTransform();
+        envGroundTransform.setIdentity();
+        envGroundTransform.setOrigin(new Ammo.btVector3( 0, 0, 0 ));
+        let envGroundRbInfo = new Ammo.btRigidBodyConstructionInfo(0, new Ammo.btDefaultMotionState(envGroundTransform), envGroundShape, new Ammo.btVector3(0, 0, 0));
+        let envGroundBody = new Ammo.btRigidBody(envGroundRbInfo);
+        envGroundBody.setRestitution(.7);
+        this.physicsWorld.addRigidBody(envGroundBody);
+
+        /*let transform = new Ammo.btTransform();
+        transform.setIdentity();
+        transform.setOrigin( new Ammo.btVector3( 0, 0, 0 ) );
+        let motionState = new Ammo.btDefaultMotionState( transform );
+        let colShape = new Ammo.btBoxShape( new Ammo.btVector3( 10, 10, 10 ) );
+        colShape.setMargin( 0.05 );
+        let localInertia = new Ammo.btVector3( 0, 0, 0 );
+        colShape.calculateLocalInertia( 1, localInertia );
+        let rbInfo = new Ammo.btRigidBodyConstructionInfo( 1, motionState, colShape, localInertia );
+        let body = new Ammo.btRigidBody( rbInfo );
+        this.rigidBodies.push(body);
+        this.physicsWorld.addRigidBody(body);*/
+
+        // create the tube collision shape
+        const mesh = new Ammo.btTriangleMesh(true, true);
+        const tubeProxyPrimitive = this.glbBuilder.primitives.find(item => item.meshName == 'tube-proxy');
+        const vertices = tubeProxyPrimitive.buffers.vertices.data;
+        const indices = tubeProxyPrimitive.buffers.indices.data;
+        for (let i = 0; i * 3 < indices.length; i++) {
+            mesh.addTriangle(
+                new Ammo.btVector3(vertices[indices[i * 3] * 3], vertices[indices[i * 3] * 3 + 1], vertices[indices[i * 3] * 3 + 2]),
+                new Ammo.btVector3(vertices[indices[i * 3 + 1] * 3], vertices[indices[i * 3 + 1] * 3 + 1], vertices[indices[i * 3 + 1] * 3 + 2]),
+                new Ammo.btVector3(vertices[indices[i * 3 + 2] * 3], vertices[indices[i * 3 + 2] * 3 + 1], vertices[indices[i * 3 + 2] * 3 + 2]),
+                false
+            );
+        }
+        this.tubeProxyShape = new Ammo.btGImpactMeshShape(mesh);
+        this.tubeProxyShape.setMargin(0.01);
+        this.tubeProxyShape.updateBound();
+
+        this.#addTube();
+    }
+
+    #addTube() {
+        const Ammo = this.Ammo;
+
+        const mass = 0.1;
+        const transform = new Ammo.btTransform();
+        transform.setIdentity();
+        transform.setOrigin(new Ammo.btVector3(0, 0, 0));
+        transform.setRotation(new Ammo.btQuaternion(0.0, -0.0, 0.5, 0.4999999701976776));
+        const motionState = new Ammo.btDefaultMotionState(transform);
+        const localInertia = new Ammo.btVector3(0, 0, 0);
+        this.tubeProxyShape.calculateLocalInertia(mass, localInertia);
+        const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, this.tubeProxyShape, localInertia);
+        const tubeBody = new Ammo.btRigidBody(rbInfo);
+        console.log(tubeBody);
+        tubeBody.setFriction(0.1);
+        tubeBody.setRestitution(0.7);
+
+        this.rigidBodies.push(tubeBody);
+        this.physicsWorld.addRigidBody(tubeBody);
     }
 
     #resizeTextures(gl) {
