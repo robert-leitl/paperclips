@@ -34,7 +34,7 @@ void main() {
     vec4 albedo = vec4(0.);
 
     // fake occlusion
-    float occlusionFactor = smoothstep(0., .2, vWorldPosition.y) * 0.3 + 0.7;
+    float occlusionFactor = smoothstep(0., .4, vWorldPosition.y) * 0.3 + 0.7;
 
     outColor = albedo + ambient + lightColor * diffuse + vec4(specular);
 

@@ -80,6 +80,7 @@ export class Paperclips {
                 //mat4.translate(this.drawUniforms.worldMatrix, rotMat, vec3.fromValues(p.x(), p.y(), p.z()));
                 //mat4.fromQuat(mat4.create(), quat.fromValues(q.x(), q.y(), q.z(), q.w()));
                 mat4.fromRotationTranslation(this.drawUniforms.worldMatrix, quat.fromValues(q.x(), q.y(), q.z(), q.w()), vec3.fromValues(p.x(), p.y(), p.z()));
+                mat4.scale(this.drawUniforms.worldMatrix, this.drawUniforms.worldMatrix, vec3.fromValues(this.TUBE_SCALE, this.TUBE_SCALE, this.TUBE_SCALE));
             }
         //}
 
@@ -230,7 +231,7 @@ export class Paperclips {
         const solver = new Ammo.btSequentialImpulseConstraintSolver();
 
         this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
-        this.physicsWorld.setGravity(new Ammo.btVector3(0, -80, 0));
+        this.physicsWorld.setGravity(new Ammo.btVector3(0, -20, 0));
 
         // define collision groups to apply raytests only to non-static objects
         const envGroup = 0x01;
@@ -266,6 +267,7 @@ export class Paperclips {
         }
         this.tubeProxyShape = new Ammo.btGImpactMeshShape(mesh);
         this.tubeProxyShape.setMargin(0.01);
+        this.tubeProxyShape.setLocalScaling(new Ammo.btVector3(this.TUBE_SCALE, this.TUBE_SCALE, this.TUBE_SCALE));
         this.tubeProxyShape.updateBound();
 
         this.#addTube(objGroup, interactiveMask);
@@ -283,7 +285,6 @@ export class Paperclips {
             const y = (1 - (e.clientY / this.canvas.clientHeight)) * 2 - 1;
             const z = 1; // at camera far plane
             const ndcPos = vec3.fromValues(x, y, z); 
-            const viewPos = vec3.transformMat4(vec3.create(), ndcPos, this.drawUniforms.inversProjectionMatrix);
             const inversViewProjectionMatrix = mat4.multiply(mat4.create(), this.drawUniforms.cameraMatrix, this.drawUniforms.inversProjectionMatrix);
             const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), inversViewProjectionMatrix);
             if (worldPos[3] !== 0){
