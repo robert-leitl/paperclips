@@ -20,6 +20,7 @@ export class Paperclips {
         near: 1,
         far: 30,
         fov: Math.PI / 3,
+        aspect: 1,
         position: vec3.fromValues(0, -7, 0),
         up: vec3.fromValues(0, 0, 1),
         matrices: {
@@ -30,7 +31,7 @@ export class Paperclips {
     };
 
     TUBE_SCALE = 3;
-    TUBE_COUNT = 3;
+    TUBE_COUNT = 1;
 
     constructor(canvas, pane, oninit = null) {
         this.canvas = canvas;
@@ -123,6 +124,10 @@ export class Paperclips {
             document.body.innerHTML = "This example requires EXT_color_buffer_float which is unavailable on this system."
         }
 
+        // initial client dimensions
+        const clientSize = vec2.fromValues(gl.canvas.clientWidth, gl.canvas.clientHeight);
+        this.drawBufferSize = vec2.clone(clientSize);
+
         ///////////////////////////////////  LOAD RESOURCES
 
         this.glbBuilder = new GLBBuilder(gl);
@@ -131,7 +136,11 @@ export class Paperclips {
         ///////////////////////////////////  Physics INITIALIZATION
 
         this.physics = new PaperclipsPhysics(this.glbBuilder);
-        await this.physics.init(this.TUBE_COUNT, this.TUBE_SCALE);
+        // get the places of the bounds of physics world
+        const boundY = Math.tan(this.camera.fov / 2) * (-this.camera.position[1] + 1);
+        const boundX = boundY * (gl.canvas.clientWidth / gl.canvas.clientHeight);
+        console.log(boundX, boundY);
+        await this.physics.init(this.TUBE_COUNT, this.TUBE_SCALE, boundX, boundY);
 
         ///////////////////////////////////  PROGRAM SETUP
 
@@ -170,17 +179,12 @@ export class Paperclips {
 
         /////////////////////////////////// FRAMEBUFFER SETUP
 
-        // initial client dimensions
-        const clientSize = vec2.fromValues(gl.canvas.clientWidth, gl.canvas.clientHeight);
-        this.drawBufferSize = vec2.clone(clientSize);
-        
         // init the pointer rotate control
         //this.control = new ArcballControl(this.canvas);
 
         this.resize();
 
         this.#initEventHandling();
-
         this.#updateCameraMatrix();
         this.#updateProjectionMatrix(gl);
 
@@ -193,15 +197,7 @@ export class Paperclips {
         // add click handler to canvas to apply impulses for the tubes
         this.canvas.addEventListener('click', (e) => {
             // calculate the clicked point on the far plane
-            const x = (e.clientX / this.canvas.clientWidth) * 2 - 1;
-            const y = (1 - (e.clientY / this.canvas.clientHeight)) * 2 - 1;
-            const z = 1; // at camera far plane
-            const ndcPos = vec3.fromValues(x, y, z); 
-            const inversViewProjectionMatrix = mat4.multiply(mat4.create(), this.camera.matrix, this.camera.matrices.inversProjection);
-            const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), inversViewProjectionMatrix);
-            if (worldPos[3] !== 0){
-                vec3.scale(worldPos, worldPos, 1 / worldPos[3]);
-            }
+            const worldPos = this.screenToWorldPosition(e.clientX, e.clientY, 1 /* camera far plane */);
 
             // test if a rigid body has been hit
             const rayStartWorldPos = vec3.clone(this.camera.position);
@@ -217,13 +213,28 @@ export class Paperclips {
                 const position = vec3.transformMat4(vec3.create(), result.position, inversModelMatrix);
 
                 // calculate the force vector from the click position
+                const x = (screenX / this.canvas.clientWidth) * 2 - 1;
+                const y = (1 - (screenY / this.canvas.clientHeight)) * 2 - 1;
                 const force = vec3.fromValues(-1 * x, 2, -1 * y);
                 vec3.normalize(force, force);
-                vec3.scale(force, force, 3.5);
+                vec3.scale(force, force, 5);
                 
                 this.physics.applyImpulse(result.body, position, force);
             }
         }); 
+    }
+
+    screenToWorldPosition(screenX, screenY, z) {
+        const x = (screenX / this.canvas.clientWidth) * 2 - 1;
+        const y = (1 - (screenY / this.canvas.clientHeight)) * 2 - 1;
+        const ndcPos = vec3.fromValues(x, y, z); 
+        const inversViewProjectionMatrix = mat4.multiply(mat4.create(), this.camera.matrix, this.camera.matrices.inversProjection);
+        const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), inversViewProjectionMatrix);
+        if (worldPos[3] !== 0){
+            vec4.scale(worldPos, worldPos, 1 / worldPos[3]);
+        }
+
+        return worldPos;
     }
 
     #resizeTextures(gl) {
@@ -259,8 +270,8 @@ export class Paperclips {
     }
 
     #updateProjectionMatrix(gl) {
-        const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-        mat4.perspective(this.camera.matrices.projection, this.camera.fov, aspect, this.camera.near, this.camera.far);
+        this.camera.aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+        mat4.perspective(this.camera.matrices.projection, this.camera.fov, this.camera.aspect, this.camera.near, this.camera.far);
         mat4.invert(this.camera.matrices.inversProjection, this.camera.matrices.projection);
     }
 

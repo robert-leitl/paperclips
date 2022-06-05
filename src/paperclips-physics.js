@@ -19,11 +19,13 @@ export class PaperclipsPhysics {
     interactiveMask = this.envGroup | this.objGroup | this.rayGroup;
     rayMask = this.objGroup | this.rayGroup;
 
+    FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT = 10;
+
     constructor(glb) {
         this.glb = glb;
     }
 
-    async init(numTubes = 1, scale = 2) {
+    async init(numTubes = 1, scale = 2, boundX, boundY) {
         this.tubeScale = scale;
 
         this.Ammo = await AmmoStartFunc();
@@ -46,13 +48,12 @@ export class PaperclipsPhysics {
         Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
 
         // create the environment enclosing box
-        const boundsOffset = 5;
-        this.#addStaticPlaneBody(vec3.fromValues(0, 1, 0), 0);
-        this.#addStaticPlaneBody(vec3.fromValues(1, 0, 0), -boundsOffset);
-        this.#addStaticPlaneBody(vec3.fromValues(-1, 0, 0), -boundsOffset);
-        this.#addStaticPlaneBody(vec3.fromValues(0, 0, 1), -boundsOffset);
-        this.#addStaticPlaneBody(vec3.fromValues(0, 0, -1), -boundsOffset);
-        this.#addStaticPlaneBody(vec3.fromValues(0, -1, 0), -30);
+        this.frontPlane = this.#addStaticPlaneBody(vec3.fromValues(0, 1, 0), 0);
+        this.rightPlane = this.#addStaticPlaneBody(vec3.fromValues(1, 0, 0), -boundX);
+        this.leftPlane = this.#addStaticPlaneBody(vec3.fromValues(-1, 0, 0), -boundX);
+        this.topPlane = this.#addStaticPlaneBody(vec3.fromValues(0, 0, 1), -boundY);
+        this.bottomPlane = this.#addStaticPlaneBody(vec3.fromValues(0, 0, -1), -boundY);
+        this.backPlane = this.#addStaticPlaneBody(vec3.fromValues(0, -1, 0), -50);
 
         // create the tube concave collision shape
         const mesh = new Ammo.btTriangleMesh(true, true);
@@ -123,6 +124,8 @@ export class PaperclipsPhysics {
             }
         }
 
+        this.#detectCollision();
+
         return bodyMatrices;
     }
 
@@ -172,6 +175,43 @@ export class PaperclipsPhysics {
         body.applyImpulse(this.impulse.force, this.impulse.position);
     }
 
+    #detectCollision() {
+        const dispatcher = this.physicsWorld.getDispatcher();
+        const numManifolds = dispatcher.getNumManifolds();
+    
+        for (let i = 0; i < numManifolds; i ++) {
+    
+            const contactManifold = dispatcher.getManifoldByIndexInternal(i);
+            const numContacts = contactManifold.getNumContacts();
+
+            const body0 = Ammo.btRigidBody.prototype.upcast(contactManifold.getBody0());
+            const body1 = Ammo.btRigidBody.prototype.upcast(contactManifold.getBody1());
+            //console.log(body0, body1);
+
+            if (
+                body1 === this.frontPlane && 
+                this.tubeBodies.some(body => body === body0) &&
+                body0.getLinearVelocity().length() > 5
+            ) {
+                this,this.#triggerFrontPlaneCollisionEvent();
+            }
+    
+            /*for (let j = 0; j < numContacts; j++) {
+                const contactPoint = contactManifold.getContactPoint(j);
+                const distance = contactPoint.getDistance();
+    
+                console.log({manifoldIndex: i, contactIndex: j, distance: distance});
+            }*/
+        }
+    }
+
+    #triggerFrontPlaneCollisionEvent() {
+        if (this.frontPlaneCollisionTimeoutId) 
+            clearTimeout(this.frontPlaneCollisionTimeoutId);
+
+        this.frontPlaneCollisionTimeoutId = setTimeout(() => console.log('cling!', performance.now()), this.FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT);
+    }
+
     #addStaticPlaneBody(normal, offset) {
         const Ammo = this.Ammo;
 
@@ -188,6 +228,8 @@ export class PaperclipsPhysics {
         let body = new Ammo.btRigidBody(info);
         body.setRestitution(1);
         this.physicsWorld.addRigidBody(body, this.envGroup, this.defaultMask);
+
+        return body;
     }
 
     #addTubeBody(x, y, z) {
