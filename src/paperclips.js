@@ -153,7 +153,7 @@ export class Paperclips {
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
         // create tube VAO
-        this.tubePrimitive = this.glbBuilder.getPrimitiveDataByMeshName('tube-simplified');
+        this.tubePrimitive = this.glbBuilder.getPrimitiveDataByMeshName('tube');
         this.tubeBuffers = this.tubePrimitive.buffers;
         this.tubeVAO = makeVertexArray(gl, [
             [this.tubeBuffers.vertices.webglBuffer, 0, this.tubeBuffers.vertices.numberOfComponents],
@@ -216,11 +216,12 @@ export class Paperclips {
                 const inversModelMatrix = mat4.invert(mat4.create(), modelMatrix);
                 const position = vec3.transformMat4(vec3.create(), result.position, inversModelMatrix);
 
-                // calculate the force vector from the hit ray
-                const force = vec3.normalize(vec3.create(), vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos));
-                vec3.scale(force, force, 3.);
+                // calculate the force vector from the click position
+                const force = vec3.fromValues(-1 * x, 2, -1 * y);
+                vec3.normalize(force, force);
+                vec3.scale(force, force, 3.5);
                 
-                this.physics.applyImpulse(result.body, position, vec3.fromValues(-1 * x, 2, -1 * y));
+                this.physics.applyImpulse(result.body, position, force);
             }
         }); 
     }

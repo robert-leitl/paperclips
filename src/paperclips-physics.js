@@ -41,7 +41,7 @@ export class PaperclipsPhysics {
         const solver = new Ammo.btSequentialImpulseConstraintSolver();
 
         this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
-        this.physicsWorld.setGravity(new Ammo.btVector3(0, -9, 0));
+        this.physicsWorld.setGravity(new Ammo.btVector3(0, -60, 0));
 
         Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
 
@@ -54,9 +54,9 @@ export class PaperclipsPhysics {
         this.#addStaticPlaneBody(vec3.fromValues(0, 0, -1), -boundsOffset);
         this.#addStaticPlaneBody(vec3.fromValues(0, -1, 0), -30);
 
-        // create the tube collision shape
+        // create the tube concave collision shape
         const mesh = new Ammo.btTriangleMesh(true, true);
-        const tubeProxyPrimitive = glb.getPrimitiveDataByMeshName('tube-proxy');
+        const tubeProxyPrimitive = glb.getPrimitiveDataByMeshName('tube.concave.proxy');
         const vertices = tubeProxyPrimitive.buffers.vertices.data;
         const indices = tubeProxyPrimitive.buffers.indices.data;
         const triangleCount = indices.length / 3;
@@ -68,22 +68,44 @@ export class PaperclipsPhysics {
                 false
             );
         }
-        this.tubeProxyShape = new Ammo.btGImpactMeshShape(mesh);
-        this.tubeProxyShape.setMargin(0.001);
-        this.tubeProxyShape.setLocalScaling(new Ammo.btVector3(this.tubeScale, this.tubeScale, this.tubeScale));
-        this.tubeProxyShape.updateBound();
+        this.tubeGImpactMeshProxyShape = new Ammo.btGImpactMeshShape(mesh);
+        this.tubeGImpactMeshProxyShape.setMargin(0.001);
+        this.tubeGImpactMeshProxyShape.setLocalScaling(new Ammo.btVector3(this.tubeScale, this.tubeScale, this.tubeScale));
+        this.tubeGImpactMeshProxyShape.updateBound();
+
+        // create the tube compound collision shape made of convex hull shapes
+        this.tubeCompoundProxyShape = new Ammo.btCompoundShape();
+        const compoundPrimitives = glb.primitives.filter(item => item.meshName.indexOf('compound') !== -1);
+        compoundPrimitives.forEach(({ buffers }) => {
+            const shape = new Ammo.btConvexHullShape();
+            const vertices = buffers.vertices.data;
+            for (let i = 0; i < vertices.length / 3; i++) {
+                shape.addPoint(new Ammo.btVector3(
+                    vertices[i * 3 + 0], 
+                    vertices[i * 3 + 1], 
+                    vertices[i * 3 + 2]
+                    ));
+            }
+
+            const transform = new Ammo.btTransform();
+            transform.setIdentity();
+            this.tubeCompoundProxyShape.addChildShape(transform, shape);
+        });
+        this.tubeCompoundProxyShape.setLocalScaling(new Ammo.btVector3(this.tubeScale, this.tubeScale, this.tubeScale));
+        this.tubeCompoundProxyShape.setMargin(0.0001);
+        
 
         // init interaction event handling
         this.impulse.force = new Ammo.btVector3(0, 1, 0);
         this.impulse.position = new Ammo.btVector3(0, 1, 0);
 
         for(let i=0; i<numTubes; ++i) {
-            this.#addTubeBody(0, i * 10 + 5, 0);
+            this.#addTubeBody(Math.random() * 4 - 2, i * 10 + 5, Math.random() * 4 - 2);
         }
     }
 
     update(deltaTime) {
-        this.physicsWorld.stepSimulation(deltaTime / 1000, 10, 1 / 240);
+        this.physicsWorld.stepSimulation(deltaTime / 1000, 10);
 
         const bodyMatrices = [];
 
@@ -171,17 +193,17 @@ export class PaperclipsPhysics {
     #addTubeBody(x, y, z) {
         const Ammo = this.Ammo;
 
-        const mass = .1;
+        const mass = 0.1;
         const transform = new Ammo.btTransform();
         transform.setIdentity();
         transform.setOrigin(new Ammo.btVector3(x, y, z));
         const motionState = new Ammo.btDefaultMotionState(transform);
         const localInertia = new Ammo.btVector3(0, 0, 0);
-        this.tubeProxyShape.calculateLocalInertia(mass, localInertia);
-        const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, this.tubeProxyShape, localInertia);
+        this.tubeCompoundProxyShape.calculateLocalInertia(mass, localInertia);
+        const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, this.tubeCompoundProxyShape, localInertia);
         const tubeBody = new Ammo.btRigidBody(rbInfo);
-        //tubeBody.setFriction(0);
-        //tubeBody.setRestitution(0.6);
+        tubeBody.setFriction(0.5);
+        tubeBody.setRestitution(.7);
 
         this.tubeBodies.push(tubeBody);
         this.physicsWorld.addRigidBody(tubeBody, this.objGroup, this.interactiveMask);
