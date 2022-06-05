@@ -1,11 +1,11 @@
 import { mat4, quat, vec2, vec3, vec4 } from 'gl-matrix';
 import { GLBBuilder } from './utils/glb-builder';
-import * as AmmoStartFunc from './libs/ammo';
 import { createAndSetupTexture, createFramebuffer, createProgram, makeBuffer, makeVertexArray, resizeCanvasToDisplaySize, setFramebuffer } from './utils/webgl-utils';
 
 import tubeVertShaderSource from './shader/tube.vert';
 import tubeFragShaderSource from './shader/tube.frag';
 import { ArcballControl } from './utils/arcball-control';
+import { PaperclipsPhysics } from './paperclips-physics';
 
 export class Paperclips {
     oninit;
@@ -20,14 +20,17 @@ export class Paperclips {
         near: 1,
         far: 30,
         fov: Math.PI / 3,
-        distance: 7,
-        orbit: quat.create(),
-        position: vec3.create(),
-        rotation: vec3.create(),
-        up: vec3.fromValues(0, 0, 1)
+        position: vec3.fromValues(0, -7, 0),
+        up: vec3.fromValues(0, 0, 1),
+        matrices: {
+            view: mat4.create(),
+            projection: mat4.create(),
+            inversProjection: mat4.create()
+        }
     };
 
-    animate = true;
+    TUBE_SCALE = 3;
+    TUBE_COUNT = 3;
 
     constructor(canvas, pane, oninit = null) {
         this.canvas = canvas;
@@ -36,15 +39,6 @@ export class Paperclips {
 
         this.#init();
     }
-
-    rigidBodies = [];
-    tmpTrans = null;
-    impulse = {
-        force: null,
-        position: null
-    };
-
-    TUBE_SCALE = 2;
 
     resize() {
         const gl = this.gl;
@@ -65,31 +59,8 @@ export class Paperclips {
         this.#deltaTime = Math.min(32, time - this.#time);
         this.#time = time;
 
-        // update physics
-        this.physicsWorld.stepSimulation(this.#deltaTime / 1000, 10);
-
-        // Update rigid bodies
-        //for (let i = 0; i < this.rigidBodies.length; i++) {
-            const body = this.rigidBodies[0];
-            const ms = body.getMotionState();
-            if (ms) {
-                ms.getWorldTransform(this.tmpTrans);
-                const p = this.tmpTrans.getOrigin();
-                const q = this.tmpTrans.getRotation();
-                
-                //mat4.translate(this.drawUniforms.worldMatrix, rotMat, vec3.fromValues(p.x(), p.y(), p.z()));
-                //mat4.fromQuat(mat4.create(), quat.fromValues(q.x(), q.y(), q.z(), q.w()));
-                mat4.fromRotationTranslation(this.drawUniforms.worldMatrix, quat.fromValues(q.x(), q.y(), q.z(), q.w()), vec3.fromValues(p.x(), p.y(), p.z()));
-                mat4.scale(this.drawUniforms.worldMatrix, this.drawUniforms.worldMatrix, vec3.fromValues(this.TUBE_SCALE, this.TUBE_SCALE, this.TUBE_SCALE));
-            }
-        //}
-
-        //this.control.update(this.#deltaTime);
-        //mat4.fromQuat(this.drawUniforms.worldMatrix, this.control.rotationQuat);
-
-        // update the world inverse transpose
-        mat4.invert(this.drawUniforms.worldInverseTransposeMatrix, this.drawUniforms.worldMatrix);
-        mat4.transpose(this.drawUniforms.worldInverseTransposeMatrix, this.drawUniforms.worldInverseTransposeMatrix);
+        // update physics and apply motion states
+        this.bodyMatrices = this.physics.update(this.#deltaTime);
 
         if (this.animate)
             this.#frames += this.#deltaTime / 16;
@@ -107,22 +78,30 @@ export class Paperclips {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
-
         gl.useProgram(this.tubeProgram);
 
         gl.enable(gl.CULL_FACE);
         gl.enable(gl.DEPTH_TEST);
 
-        gl.uniformMatrix4fv(this.tubeLocations.uViewMatrix, false, this.drawUniforms.viewMatrix);
-        gl.uniformMatrix4fv(this.tubeLocations.uProjectionMatrix, false, this.drawUniforms.projectionMatrix);
+        gl.uniformMatrix4fv(this.tubeLocations.uViewMatrix, false, this.camera.matrices.view);
+        gl.uniformMatrix4fv(this.tubeLocations.uProjectionMatrix, false, this.camera.matrices.projection);
         gl.uniform3f(this.tubeLocations.uCameraPosition, this.camera.position[0], this.camera.position[1], this.camera.position[2]);
-        gl.uniformMatrix4fv(this.tubeLocations.uWorldMatrix, false, this.drawUniforms.worldMatrix);
-        gl.uniformMatrix4fv(this.tubeLocations.uWorldInverseTransposeMatrix, false, this.drawUniforms.worldInverseTransposeMatrix);
         gl.uniform1f(this.tubeLocations.uFrames, this.#frames);
-
         gl.bindVertexArray(this.tubeVAO);
-        gl.drawElements(gl.TRIANGLES, this.tubeBuffers.indices.length, gl.UNSIGNED_SHORT, 0);
+        this.bodyMatrices.forEach(matrix => this.#renderTube(matrix));
+    }
 
+    #renderTube(matrix) {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        // update the world inverse transpose
+        const worldInverseTranspose = mat4.invert(mat4.create(), matrix);
+        mat4.transpose(worldInverseTranspose, worldInverseTranspose);
+
+        gl.uniformMatrix4fv(this.tubeLocations.uWorldMatrix, false, matrix);
+        gl.uniformMatrix4fv(this.tubeLocations.uWorldInverseTransposeMatrix, false, worldInverseTranspose);
+        gl.drawElements(gl.TRIANGLES, this.tubeBuffers.indices.length, gl.UNSIGNED_SHORT, 0);
     }
 
     destroy() {
@@ -151,8 +130,8 @@ export class Paperclips {
 
         ///////////////////////////////////  Physics INITIALIZATION
 
-        this.Ammo = await AmmoStartFunc();
-        this.#initPhysics();
+        this.physics = new PaperclipsPhysics(this.glbBuilder);
+        await this.physics.init(this.TUBE_COUNT, this.TUBE_SCALE);
 
         ///////////////////////////////////  PROGRAM SETUP
 
@@ -170,21 +149,11 @@ export class Paperclips {
             uCameraPosition: gl.getUniformLocation(this.tubeProgram, 'uCameraPosition'),
             uFrames: gl.getUniformLocation(this.tubeProgram, 'uFrames')
         };
-        
-        // setup uniforms
-        this.drawUniforms = {
-            worldMatrix: mat4.create(),
-            viewMatrix: mat4.create(),
-            cameraMatrix: mat4.create(),
-            projectionMatrix: mat4.create(),
-            inversProjectionMatrix: mat4.create(),
-            worldInverseTransposeMatrix: mat4.create()
-        };
-
+    
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
         // create tube VAO
-        this.tubePrimitive = this.glbBuilder.primitives.find(item => item.meshName == 'tube-simplified');
+        this.tubePrimitive = this.glbBuilder.getPrimitiveDataByMeshName('tube-simplified');
         this.tubeBuffers = this.tubePrimitive.buffers;
         this.tubeVAO = makeVertexArray(gl, [
             [this.tubeBuffers.vertices.webglBuffer, 0, this.tubeBuffers.vertices.numberOfComponents],
@@ -206,11 +175,12 @@ export class Paperclips {
         this.drawBufferSize = vec2.clone(clientSize);
         
         // init the pointer rotate control
-        this.control = new ArcballControl(this.canvas);
+        //this.control = new ArcballControl(this.canvas);
 
         this.resize();
 
-        this.camera.position[1] = -this.camera.distance;
+        this.#initEventHandling();
+
         this.#updateCameraMatrix();
         this.#updateProjectionMatrix(gl);
 
@@ -219,73 +189,15 @@ export class Paperclips {
         if (this.oninit) this.oninit(this);
     }
 
-    #initPhysics() {
-        const Ammo = this.Ammo;
-
-        // reused to get the transformations of rigid bodies
-        this.tmpTrans = new Ammo.btTransform();
-
-        const collisionConfiguration = new Ammo.btDefaultCollisionConfiguration();
-        const dispatcher = new Ammo.btCollisionDispatcher(collisionConfiguration);
-        const overlappingPairCache = new Ammo.btDbvtBroadphase();
-        const solver = new Ammo.btSequentialImpulseConstraintSolver();
-
-        this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
-        this.physicsWorld.setGravity(new Ammo.btVector3(0, -20, 0));
-
-        // define collision groups to apply raytests only to non-static objects
-        const envGroup = 0x01;
-        const objGroup = 0x02;
-        const rayGroup = 0x04;
-        const defaultMask = envGroup | objGroup;
-        const interactiveMask = envGroup | objGroup | rayGroup;
-        const rayMask = objGroup | rayGroup;
-
-        Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
-
-        // create the environment enclosing box
-        const boundsOffset = 5;
-        this.#addStaticPlaneShape(vec3.fromValues(0, 1, 0), 0, envGroup, defaultMask);
-        this.#addStaticPlaneShape(vec3.fromValues(1, 0, 0), -boundsOffset, envGroup, defaultMask);
-        this.#addStaticPlaneShape(vec3.fromValues(-1, 0, 0), -boundsOffset, envGroup, defaultMask);
-        this.#addStaticPlaneShape(vec3.fromValues(0, 0, 1), -boundsOffset, envGroup, defaultMask);
-        this.#addStaticPlaneShape(vec3.fromValues(0, 0, -1), -boundsOffset, envGroup, defaultMask);
-        this.#addStaticPlaneShape(vec3.fromValues(0, -1, 0), -30, envGroup, defaultMask);
-
-        // create the tube collision shape
-        const mesh = new Ammo.btTriangleMesh(true, true);
-        const tubeProxyPrimitive = this.glbBuilder.primitives.find(item => item.meshName == 'tube-proxy');
-        const vertices = tubeProxyPrimitive.buffers.vertices.data;
-        const indices = tubeProxyPrimitive.buffers.indices.data;
-        for (let i = 0; i * 3 < indices.length; i++) {
-            mesh.addTriangle(
-                new Ammo.btVector3(vertices[indices[i * 3] * 3], vertices[indices[i * 3] * 3 + 1], vertices[indices[i * 3] * 3 + 2]),
-                new Ammo.btVector3(vertices[indices[i * 3 + 1] * 3], vertices[indices[i * 3 + 1] * 3 + 1], vertices[indices[i * 3 + 1] * 3 + 2]),
-                new Ammo.btVector3(vertices[indices[i * 3 + 2] * 3], vertices[indices[i * 3 + 2] * 3 + 1], vertices[indices[i * 3 + 2] * 3 + 2]),
-                false
-            );
-        }
-        this.tubeProxyShape = new Ammo.btGImpactMeshShape(mesh);
-        this.tubeProxyShape.setMargin(0.01);
-        this.tubeProxyShape.setLocalScaling(new Ammo.btVector3(this.TUBE_SCALE, this.TUBE_SCALE, this.TUBE_SCALE));
-        this.tubeProxyShape.updateBound();
-
-        this.#addTube(objGroup, interactiveMask);
-
-
-        // init interaction event handling
-        this.impulse.force = new Ammo.btVector3(0, 1, 0);
-        this.impulse.position = new Ammo.btVector3(0, 1, 0);
-
+    #initEventHandling() {
+        // add click handler to canvas to apply impulses for the tubes
         this.canvas.addEventListener('click', (e) => {
-            const body = this.rigidBodies[0];
-
             // calculate the clicked point on the far plane
             const x = (e.clientX / this.canvas.clientWidth) * 2 - 1;
             const y = (1 - (e.clientY / this.canvas.clientHeight)) * 2 - 1;
             const z = 1; // at camera far plane
             const ndcPos = vec3.fromValues(x, y, z); 
-            const inversViewProjectionMatrix = mat4.multiply(mat4.create(), this.drawUniforms.cameraMatrix, this.drawUniforms.inversProjectionMatrix);
+            const inversViewProjectionMatrix = mat4.multiply(mat4.create(), this.camera.matrix, this.camera.matrices.inversProjection);
             const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), inversViewProjectionMatrix);
             if (worldPos[3] !== 0){
                 vec3.scale(worldPos, worldPos, 1 / worldPos[3]);
@@ -293,78 +205,24 @@ export class Paperclips {
 
             // test if a rigid body has been hit
             const rayStartWorldPos = vec3.clone(this.camera.position);
-            const rayStartWorldPosAmmoVec3 = new Ammo.btVector3(rayStartWorldPos[0], rayStartWorldPos[1], rayStartWorldPos[2]);
             const rayEndWorldPos = worldPos;
-            const rayEndWorldPosAmmoVec3 = new Ammo.btVector3(rayEndWorldPos[0], rayEndWorldPos[1], rayEndWorldPos[2]);
-            const hitResult = new Ammo.ClosestRayResultCallback(rayStartWorldPosAmmoVec3, rayEndWorldPosAmmoVec3);
-            hitResult.m_collisionFilterGroup = rayGroup;
-            hitResult.m_collisionFilterMask = rayMask;
-            this.physicsWorld.rayTest(
-                rayStartWorldPosAmmoVec3, 
-                rayEndWorldPosAmmoVec3, 
-                hitResult
-            );
+            const result = this.physics.getClosestRayHitTestResult(rayStartWorldPos, rayEndWorldPos);
 
-            if (hitResult.hasHit()) {
-                const hitPos = hitResult.m_hitPointWorld;
-                const hitWorldPos = vec3.fromValues(hitPos.x(), hitPos.y(), hitPos.z());
-                // transform to model space
-                const inversModelMatrix = mat4.invert(mat4.create(), this.drawUniforms.worldMatrix);
-                const hitModelPos = vec3.transformMat4(vec3.create(), hitWorldPos, inversModelMatrix);
+            if (result) {
+                // get the corresponding tube graphics body
+                const modelMatrix = this.bodyMatrices[this.physics.getTubeBodyIndex(result.body)];
 
-                // apply the hit position in model space as the impulse rel position
-                this.impulse.position.setX(hitModelPos[0]);
-                this.impulse.position.setY(hitModelPos[1]);
-                this.impulse.position.setZ(hitModelPos[2]);
-                
+                // transform the hit position from world to model space
+                const inversModelMatrix = mat4.invert(mat4.create(), modelMatrix);
+                const position = vec3.transformMat4(vec3.create(), result.position, inversModelMatrix);
+
                 // calculate the force vector from the hit ray
                 const force = vec3.normalize(vec3.create(), vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos));
                 vec3.scale(force, force, 3.);
-                this.impulse.force.setX(force[0]);
-                this.impulse.force.setY(force[1]);
-                this.impulse.force.setZ(force[2]);
-
-                body.activate();
-                body.applyImpulse(this.impulse.force, this.impulse.position);
+                
+                this.physics.applyImpulse(result.body, position, vec3.fromValues(-1 * x, 2, -1 * y));
             }
-        });
-    }
-
-    #addStaticPlaneShape(normal, offset, collisionGroup, collisionMask) {
-        const Ammo = this.Ammo;
-
-        const shape = new Ammo.btStaticPlaneShape(new Ammo.btVector3(normal[0], normal[1], normal[2]), offset);
-        shape.setMargin( 0.01 );
-        const transform = new Ammo.btTransform();
-        transform.setIdentity();
-        let info = new Ammo.btRigidBodyConstructionInfo(
-            0, 
-            new Ammo.btDefaultMotionState(transform), 
-            shape, 
-            new Ammo.btVector3(0, 0, 0)
-        );
-        let body = new Ammo.btRigidBody(info);
-        body.setRestitution(1);
-        this.physicsWorld.addRigidBody(body, collisionGroup, collisionMask);
-    }
-
-    #addTube(collisionGroup, collisionMask) {
-        const Ammo = this.Ammo;
-
-        const mass = 0.1;
-        const transform = new Ammo.btTransform();
-        transform.setIdentity();
-        transform.setOrigin(new Ammo.btVector3(0, 5, 0));
-        const motionState = new Ammo.btDefaultMotionState(transform);
-        const localInertia = new Ammo.btVector3(0, 0, 0);
-        this.tubeProxyShape.calculateLocalInertia(mass, localInertia);
-        const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, this.tubeProxyShape, localInertia);
-        const tubeBody = new Ammo.btRigidBody(rbInfo);
-        tubeBody.setFriction(1);
-        tubeBody.setRestitution(0.6);
-
-        this.rigidBodies.push(tubeBody);
-        this.physicsWorld.addRigidBody(tubeBody, collisionGroup, collisionMask);
+        }); 
     }
 
     #resizeTextures(gl) {
@@ -396,14 +254,13 @@ export class Paperclips {
 
     #updateCameraMatrix() {
         mat4.targetTo(this.camera.matrix, this.camera.position, [0, 0, 0], this.camera.up);
-        mat4.invert(this.drawUniforms.viewMatrix, this.camera.matrix);
-        mat4.copy(this.drawUniforms.cameraMatrix, this.camera.matrix);
+        mat4.invert(this.camera.matrices.view, this.camera.matrix);
     }
 
     #updateProjectionMatrix(gl) {
         const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-        mat4.perspective(this.drawUniforms.projectionMatrix, this.camera.fov, aspect, this.camera.near, this.camera.far);
-        mat4.invert(this.drawUniforms.inversProjectionMatrix, this.drawUniforms.projectionMatrix);
+        mat4.perspective(this.camera.matrices.projection, this.camera.fov, aspect, this.camera.near, this.camera.far);
+        mat4.invert(this.camera.matrices.inversProjection, this.camera.matrices.projection);
     }
 
     initTweakpane() {

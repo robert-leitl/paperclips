@@ -26,12 +26,16 @@ export class GLBBuilder {
         return this.primitives;
     }
 
+    getPrimitiveDataByMeshName(meshName) {
+        return this.primitives.find(item => item.meshName == meshName);
+    }
+
     async loadPrimitive(glb, meshName, primitiveDef) {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
         const indices = GLBBuilder.getAccessorData(glb, primitiveDef.indices);
-        let vertices = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.POSITION);
+        const vertices = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.POSITION);
         const normals = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.NORMAL);
 
         if (!indices || !vertices || !normals) return null;
