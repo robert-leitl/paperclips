@@ -26,7 +26,7 @@ export class PaperclipsAudio {
         const impulseLowPass = new Tone.Filter(200, 'lowpass');
         const impulseReverb = new Tone.Reverb(4);
         this.impulseSound = new Tone.MembraneSynth({
-            volume: -20,
+            volume: -25,
             envelope: {
                 attack: 0.005,
                 decay: 0.8,

@@ -1,6 +1,7 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
-import * as AmmoStartFunc from './libs/ammo';
 import { GLBBuilder } from './utils/glb-builder';
+
+const ammo = require('./libs/ammo');
 
 export class PaperclipsPhysics {
 
@@ -33,7 +34,7 @@ export class PaperclipsPhysics {
     async init(numTubes = 1, scale = 2, boundX, boundY) {
         this.tubeScale = scale;
 
-        this.Ammo = await AmmoStartFunc();
+        this.Ammo = await ammo();
         const Ammo = this.Ammo;
 
         /** @type {GLBBuilder} */
