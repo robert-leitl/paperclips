@@ -11,6 +11,9 @@ export class PaperclipsPhysics {
         position: null
     };
 
+    // callback for front plane collision events
+    onFrontPlaneCollision = null;
+
     // define collision groups to apply raytests only to non-static objects
     envGroup = 0x01;
     objGroup = 0x02;
@@ -19,8 +22,8 @@ export class PaperclipsPhysics {
     interactiveMask = this.envGroup | this.objGroup | this.rayGroup;
     rayMask = this.objGroup | this.rayGroup;
 
-    FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT = 20;
-    MIN_COLLISION_LINEAR_VELOCITY = 5;
+    FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT = 200;
+    MIN_COLLISION_LINEAR_VELOCITY = 4;
     frontPlaneCollisionTimeoutIds = new WeakMap();
 
     constructor(glb) {
@@ -47,15 +50,15 @@ export class PaperclipsPhysics {
         this.physicsWorld = new Ammo.btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
         this.physicsWorld.setGravity(new Ammo.btVector3(0, -60, 0));
 
-        Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
+        //Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(this.physicsWorld.getDispatcher());
 
         // create the environment enclosing box
-        this.frontPlane = this.#addStaticPlaneBody(vec3.fromValues(0, 1, 0), 0);
-        this.rightPlane = this.#addStaticPlaneBody(vec3.fromValues(1, 0, 0), -boundX);
-        this.leftPlane = this.#addStaticPlaneBody(vec3.fromValues(-1, 0, 0), -boundX);
-        this.topPlane = this.#addStaticPlaneBody(vec3.fromValues(0, 0, 1), -boundY);
-        this.bottomPlane = this.#addStaticPlaneBody(vec3.fromValues(0, 0, -1), -boundY);
-        this.backPlane = this.#addStaticPlaneBody(vec3.fromValues(0, -1, 0), -50);
+        this.frontPlane = this.#addStaticPlaneBody('front', vec3.fromValues(0, 1, 0), 0);
+        this.rightPlane = this.#addStaticPlaneBody('right', vec3.fromValues(1, 0, 0), -boundX);
+        this.leftPlane = this.#addStaticPlaneBody('left', vec3.fromValues(-1, 0, 0), -boundX);
+        this.topPlane = this.#addStaticPlaneBody('top', vec3.fromValues(0, 0, 1), -boundY);
+        this.bottomPlane = this.#addStaticPlaneBody('bottom', vec3.fromValues(0, 0, -1), -boundY);
+        this.backPlane = this.#addStaticPlaneBody('back', vec3.fromValues(0, -1, 0), -50);
 
         // create the tube concave collision shape
         const mesh = new Ammo.btTriangleMesh(true, true);
@@ -103,7 +106,7 @@ export class PaperclipsPhysics {
         this.impulse.position = new Ammo.btVector3(0, 1, 0);
 
         for(let i=0; i<numTubes; ++i) {
-            this.#addTubeBody(Math.random() * 4 - 2, i * 10 + 5, Math.random() * 4 - 2);
+            this.#addTubeBody(`tube.${i}`, Math.random() * 4 - 2, i * 10 + 5, Math.random() * 4 - 2);
         }
     }
 
@@ -188,32 +191,31 @@ export class PaperclipsPhysics {
 
             const body0 = Ammo.btRigidBody.prototype.upcast(contactManifold.getBody0());
             const body1 = Ammo.btRigidBody.prototype.upcast(contactManifold.getBody1());
+            const velocityLength0 = body0.getLinearVelocity().length()
 
             if (
+                numContacts > 0 &&
                 body1 === this.frontPlane && 
                 this.tubeBodies.some(body => body === body0) &&
-                body0.getLinearVelocity().length() > this.MIN_COLLISION_LINEAR_VELOCITY
+                velocityLength0 > this.MIN_COLLISION_LINEAR_VELOCITY
             ) {
-                this,this.#triggerFrontPlaneCollisionEvent(body0);
+                this.#triggerFrontPlaneCollisionEvent(body0, velocityLength0);
             }
         }
     }
 
-    #triggerFrontPlaneCollisionEvent(tubeBody) {
-        if (this.frontPlaneCollisionTimeoutIds.has(tubeBody)) {
-            clearTimeout(this.frontPlaneCollisionTimeoutIds.get(tubeBody));
-            this.frontPlaneCollisionTimeoutIds.delete(tubeBody);
-        }
+    #triggerFrontPlaneCollisionEvent(tubeBody, strength) {
+        if (!this.frontPlaneCollisionTimeoutIds.has(tubeBody)) {
+            if (this.onFrontPlaneCollision) this.onFrontPlaneCollision(strength);
 
-        this.frontPlaneCollisionTimeoutIds.set(
-            tubeBody, 
-            setTimeout(() => {
-                console.log('cling!', tubeBody);
-            }, this.FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT)
-        );
+            this.frontPlaneCollisionTimeoutIds.set(
+                tubeBody, 
+                setTimeout(() => this.frontPlaneCollisionTimeoutIds.delete(tubeBody), this.FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT)
+            );
+        }
     }
 
-    #addStaticPlaneBody(normal, offset) {
+    #addStaticPlaneBody(name, normal, offset) {
         const Ammo = this.Ammo;
 
         const shape = new Ammo.btStaticPlaneShape(new Ammo.btVector3(normal[0], normal[1], normal[2]), offset);
@@ -228,12 +230,14 @@ export class PaperclipsPhysics {
         );
         let body = new Ammo.btRigidBody(info);
         body.setRestitution(1);
+        body.userData = { name };
+
         this.physicsWorld.addRigidBody(body, this.envGroup, this.defaultMask);
 
         return body;
     }
 
-    #addTubeBody(x, y, z) {
+    #addTubeBody(name, x, y, z) {
         const Ammo = this.Ammo;
 
         const mass = 0.1;
@@ -247,6 +251,7 @@ export class PaperclipsPhysics {
         const tubeBody = new Ammo.btRigidBody(rbInfo);
         tubeBody.setFriction(0.5);
         tubeBody.setRestitution(.7);
+        tubeBody.userData = { name };
 
         this.tubeBodies.push(tubeBody);
         this.physicsWorld.addRigidBody(tubeBody, this.objGroup, this.interactiveMask);

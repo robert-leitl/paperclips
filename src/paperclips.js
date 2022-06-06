@@ -6,6 +6,7 @@ import tubeVertShaderSource from './shader/tube.vert';
 import tubeFragShaderSource from './shader/tube.frag';
 import { ArcballControl } from './utils/arcball-control';
 import { PaperclipsPhysics } from './paperclips-physics';
+import { PaperclipsAudio } from './paperclips-audio';
 
 export class Paperclips {
     oninit;
@@ -112,6 +113,9 @@ export class Paperclips {
     async #init() {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
+        // the scale factor adapt physics and graphic properties to the screen size
+        this.scaleFactor = Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.5);
+
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
@@ -133,14 +137,18 @@ export class Paperclips {
         this.glbBuilder = new GLBBuilder(gl);
         await this.glbBuilder.load(new URL('./assets/models/tube.glb', import.meta.url));
 
-        ///////////////////////////////////  Physics INITIALIZATION
+        ///////////////////////////////////  PHYSICS INITIALIZATION
 
         this.physics = new PaperclipsPhysics(this.glbBuilder);
         // get the places of the bounds of physics world
         const boundY = Math.tan(this.camera.fov / 2) * (-this.camera.position[1] + 1);
         const boundX = boundY * (gl.canvas.clientWidth / gl.canvas.clientHeight);
-        const tubeScale = Math.min(gl.canvas.clientWidth, gl.canvas.clientHeight) / 250;
-        await this.physics.init(this.TUBE_COUNT, tubeScale, boundX, boundY);
+        await this.physics.init(this.TUBE_COUNT, this.scaleFactor, boundX, boundY);
+
+        ///////////////////////////////////  AUDIO INITIALIZATION
+
+        this.audio = new PaperclipsAudio();
+        this.physics.onFrontPlaneCollision = (strength) => this.audio.playFrontPlaneCollisionSound(strength);
 
         ///////////////////////////////////  PROGRAM SETUP
 
@@ -213,13 +221,18 @@ export class Paperclips {
                 const position = vec3.transformMat4(vec3.create(), result.position, inversModelMatrix);
 
                 // calculate the force vector from the click position
-                const x = (screenX / this.canvas.clientWidth) * 2 - 1;
+                /*const x = (screenX / this.canvas.clientWidth) * 2 - 1;
                 const y = (1 - (screenY / this.canvas.clientHeight)) * 2 - 1;
                 const force = vec3.fromValues(-1 * x, 2, -1 * y);
+                vec3.normalize(force, force);*/
+                // calculate the force from the ray direction
+                const force = vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos);
                 vec3.normalize(force, force);
-                vec3.scale(force, force, 5);
+                vec3.scale(force, force, this.scaleFactor * 1.5);
                 
                 this.physics.applyImpulse(result.body, position, force);
+
+                this.audio.playImpulseSound();
             }
         }); 
     }
