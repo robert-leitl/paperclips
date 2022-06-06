@@ -30,8 +30,8 @@ export class Paperclips {
         }
     };
 
-    TUBE_SCALE = 3;
-    TUBE_COUNT = 1;
+    DEFAULT_TUBE_SCALE = 3;
+    TUBE_COUNT = 2;
 
     constructor(canvas, pane, oninit = null) {
         this.canvas = canvas;
@@ -139,8 +139,8 @@ export class Paperclips {
         // get the places of the bounds of physics world
         const boundY = Math.tan(this.camera.fov / 2) * (-this.camera.position[1] + 1);
         const boundX = boundY * (gl.canvas.clientWidth / gl.canvas.clientHeight);
-        console.log(boundX, boundY);
-        await this.physics.init(this.TUBE_COUNT, this.TUBE_SCALE, boundX, boundY);
+        const tubeScale = Math.min(gl.canvas.clientWidth, gl.canvas.clientHeight) / 250;
+        await this.physics.init(this.TUBE_COUNT, tubeScale, boundX, boundY);
 
         ///////////////////////////////////  PROGRAM SETUP
 

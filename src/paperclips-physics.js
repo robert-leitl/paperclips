@@ -19,7 +19,9 @@ export class PaperclipsPhysics {
     interactiveMask = this.envGroup | this.objGroup | this.rayGroup;
     rayMask = this.objGroup | this.rayGroup;
 
-    FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT = 10;
+    FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT = 20;
+    MIN_COLLISION_LINEAR_VELOCITY = 5;
+    frontPlaneCollisionTimeoutIds = new WeakMap();
 
     constructor(glb) {
         this.glb = glb;
@@ -186,30 +188,29 @@ export class PaperclipsPhysics {
 
             const body0 = Ammo.btRigidBody.prototype.upcast(contactManifold.getBody0());
             const body1 = Ammo.btRigidBody.prototype.upcast(contactManifold.getBody1());
-            //console.log(body0, body1);
 
             if (
                 body1 === this.frontPlane && 
                 this.tubeBodies.some(body => body === body0) &&
-                body0.getLinearVelocity().length() > 5
+                body0.getLinearVelocity().length() > this.MIN_COLLISION_LINEAR_VELOCITY
             ) {
-                this,this.#triggerFrontPlaneCollisionEvent();
+                this,this.#triggerFrontPlaneCollisionEvent(body0);
             }
-    
-            /*for (let j = 0; j < numContacts; j++) {
-                const contactPoint = contactManifold.getContactPoint(j);
-                const distance = contactPoint.getDistance();
-    
-                console.log({manifoldIndex: i, contactIndex: j, distance: distance});
-            }*/
         }
     }
 
-    #triggerFrontPlaneCollisionEvent() {
-        if (this.frontPlaneCollisionTimeoutId) 
-            clearTimeout(this.frontPlaneCollisionTimeoutId);
+    #triggerFrontPlaneCollisionEvent(tubeBody) {
+        if (this.frontPlaneCollisionTimeoutIds.has(tubeBody)) {
+            clearTimeout(this.frontPlaneCollisionTimeoutIds.get(tubeBody));
+            this.frontPlaneCollisionTimeoutIds.delete(tubeBody);
+        }
 
-        this.frontPlaneCollisionTimeoutId = setTimeout(() => console.log('cling!', performance.now()), this.FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT);
+        this.frontPlaneCollisionTimeoutIds.set(
+            tubeBody, 
+            setTimeout(() => {
+                console.log('cling!', tubeBody);
+            }, this.FRONT_PLANE_COLLISION_DEBOUNCE_TIMEOUT)
+        );
     }
 
     #addStaticPlaneBody(normal, offset) {
