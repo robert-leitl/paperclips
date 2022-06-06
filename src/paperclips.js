@@ -119,7 +119,7 @@ export class Paperclips {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
         // the scale factor adapt physics and graphic properties to the screen size
-        this.scaleFactor = Math.max(Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.5), 2);
+        this.scaleFactor = Math.max(Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.75), 2);
 
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
@@ -209,17 +209,24 @@ export class Paperclips {
     #initEventHandling() {
         // add click handler to canvas to apply impulses for the tubes
         this.canvas.addEventListener('click', (e) => {
+
             // calculate the clicked point on the far plane
             const worldPos = this.screenToWorldPosition(e.clientX, e.clientY, 1 /* camera far plane */);
 
+            const s = vec3.clone(this.camera.position); // ray start
+            const d = vec3.subtract(vec3.create(), worldPos, s); // ray direction
+            vec3.normalize(d, d);
+
             // test if a rigid body has been hit
-            const rayStartWorldPos = vec3.clone(this.camera.position);
+            const rayStartWorldPos = s;
             const rayEndWorldPos = worldPos;
             const result = this.physics.getClosestRayHitTestResult(rayStartWorldPos, rayEndWorldPos);
+            let resultBodyIndex = null;
 
             if (result) {
                 // get the corresponding tube graphics body
-                const modelMatrix = this.bodyMatrices[this.physics.getTubeBodyIndex(result.body)];
+                resultBodyIndex = this.physics.getTubeBodyIndex(result.body);
+                const modelMatrix = this.bodyMatrices[resultBodyIndex];
 
                 // transform the hit position from world to model space
                 const inversModelMatrix = mat4.invert(mat4.create(), modelMatrix);
@@ -231,14 +238,30 @@ export class Paperclips {
                 const force = vec3.fromValues(-1 * x, 2, -1 * y);
                 vec3.normalize(force, force);*/
                 // calculate the force from the ray direction
-                const force = vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos);
-                vec3.normalize(force, force);
-                vec3.scale(force, force, Math.max(3, this.scaleFactor * 1.5));
+                const force = vec3.scale(vec3.create(), d, Math.max(3, this.scaleFactor * 1.5));
                 
                 this.physics.applyImpulse(result.body, position, force);
-
-                this.audio.playImpulseSound();
             }
+
+            
+            // intersect with XZ plane
+            const t = -s[1] / d[1];
+            const intersection = vec3.add(vec3.create(), vec3.scale(vec3.create(), d, t), s);
+
+            for(let i=0; i<this.bodyMatrices.length; ++i) {
+                if (resultBodyIndex === i) continue;
+
+                const modelMatrix = this.bodyMatrices[i];
+                const modelPosition = vec3.fromValues(modelMatrix[12], modelMatrix[13], modelMatrix[14]);
+                const iM = vec3.subtract(vec3.create(), modelPosition, intersection);
+                const forceValue = Math.max(0, 5 / (vec3.length(iM) + 0.01));
+                console.log(forceValue);
+                const force = vec3.scale(vec3.create(), vec3.normalize(iM, iM), forceValue * this.scaleFactor);
+                
+                this.physics.applyImpulse(this.physics.tubeBodies[i], vec3.create(), force);
+            }
+            
+            this.audio.playImpulseSound();
         }); 
     }
 
