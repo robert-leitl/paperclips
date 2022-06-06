@@ -1,5 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { GLBBuilder } from './utils/glb-builder';
+const ammo = require('./libs/ammo');
 
 export class PaperclipsPhysics {
 
@@ -30,8 +31,6 @@ export class PaperclipsPhysics {
     }
 
     async init(numTubes = 1, scale = 2, boundX, boundY) {
-        var ammo = require('./libs/ammo');
-
         this.tubeScale = scale;
 
         this.Ammo = await ammo();
@@ -106,8 +105,10 @@ export class PaperclipsPhysics {
         this.impulse.force = new Ammo.btVector3(0, 1, 0);
         this.impulse.position = new Ammo.btVector3(0, 1, 0);
 
+        const rx = boundX / 1.5;
+        const ry = boundY / 1.5;
         for(let i=0; i<numTubes; ++i) {
-            this.#addTubeBody(`tube.${i}`, Math.random() * 4 - 2, i * 10 + 5, Math.random() * 4 - 2);
+            this.#addTubeBody(`tube.${i}`, Math.random() * rx - rx/2, i * 10 + 20, Math.random() * ry - ry/2);
         }
     }
 
@@ -245,6 +246,7 @@ export class PaperclipsPhysics {
         const transform = new Ammo.btTransform();
         transform.setIdentity();
         transform.setOrigin(new Ammo.btVector3(x, y, z));
+        transform.setRotation(new Ammo.btQuaternion(Math.random(), Math.random(), Math.random(), Math.random()));
         const motionState = new Ammo.btDefaultMotionState(transform);
         const localInertia = new Ammo.btVector3(0, 0, 0);
         this.tubeCompoundProxyShape.calculateLocalInertia(mass, localInertia);
