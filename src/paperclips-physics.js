@@ -30,8 +30,8 @@ export class PaperclipsPhysics {
     }
 
     async init(numTubes = 1, scale = 2, boundX, boundY) {
-        const ammo = require('./libs/ammo');
-        
+        var ammo = require('./libs/ammo');
+
         this.tubeScale = scale;
 
         this.Ammo = await ammo();
