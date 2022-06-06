@@ -32,7 +32,7 @@ export class Paperclips {
     };
 
     DEFAULT_TUBE_SCALE = 3;
-    TUBE_COUNT = 2;
+    TUBE_COUNT = 3;
 
     constructor(canvas, pane, oninit = null) {
         this.canvas = canvas;
@@ -87,7 +87,7 @@ export class Paperclips {
         gl.enable(gl.CULL_FACE);
         gl.enable(gl.DEPTH_TEST);
 
-        gl.clearColor(1, 1, 1, 0);
+        gl.clearColor(1, 1, .25, 0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         gl.uniformMatrix4fv(this.tubeLocations.uViewMatrix, false, this.camera.matrices.view);
@@ -119,7 +119,7 @@ export class Paperclips {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
         // the scale factor adapt physics and graphic properties to the screen size
-        this.scaleFactor = Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.5);
+        this.scaleFactor = Math.max(Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.5), 2);
 
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;

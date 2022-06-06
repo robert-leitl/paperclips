@@ -11,7 +11,7 @@ in vec3 vWorldNormal;
 out vec4 outColor;
 
 void main() {
-    vec4 lightColor = vec4(1., 1., 1., 0.);
+    vec4 lightColor = vec4(1., .95, 0.7, 0.);
     vec3 lightDirection = vec3(0.1, .1, 0.1);
 
     vec3 P = vWorldPosition;
@@ -25,18 +25,21 @@ void main() {
     float specular = pow(max(0., max(0., dot(H, L))), 100.);
 
     // diffuse term
-    float diffuse = NdL * 0.9;
+    float diffuse = NdL;
 
     // ambient light color
-    vec4 ambient = vec4(0.1);
+    vec4 ambient = vec4(0., 0., 0., 1.);
     
     // the material albedo color
-    vec4 albedo = vec4(0.1);
+    vec4 albedo = vec4(0., 0., 0., 1.);
+
+    // fresnel term
+    vec4 fresnel = smoothstep(0.25, 1., max(0., (1. - dot(-V, N)))) * vec4(1., 1., 0.25, 1.);
 
     // fake occlusion
-    float occlusionFactor = smoothstep(0., .4, vWorldPosition.y) * 0.3 + 0.7;
+    float occlusionFactor = smoothstep(0., .5, vWorldPosition.y);
 
-    outColor = albedo + ambient + lightColor * diffuse + vec4(specular * 0.5);
+    outColor = (albedo + ambient + lightColor * diffuse + vec4(specular)) * 0.5 + fresnel;
 
     outColor *= occlusionFactor;
 }
