@@ -7,6 +7,7 @@ html, body {
     font-size: 18px;
     color: #111;
     overflow: hidden;
+    touch-action: none;
 }
 
 canvas {
@@ -16,4 +17,28 @@ canvas {
 
 .tp-dfwv .tp-rotv {
     font-size: 9px;
+}
+
+#start-button {
+    z-index: 2;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: -.05em;
+    color: #222;
+    background-color: #fff;
+    border: 5px solid #222;
+    justify-content: center;
+    align-items: center;
+    font-family: sans-serif;
+    font-weight: bold;
+    font-size: 2.2em;
+    line-height: .9em;
+    display: flex;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 7em;
+    padding: 0.5em;
+    padding-top: 0.6em;
 }

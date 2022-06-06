@@ -19,7 +19,7 @@ export class Paperclips {
     camera = {
         matrix: mat4.create(),
         near: 1,
-        far: 30,
+        far: 60,
         fov: Math.PI / 3,
         aspect: 1,
         position: vec3.fromValues(0, -7, 0),
@@ -38,7 +38,9 @@ export class Paperclips {
         this.canvas = canvas;
         this.pane = pane;
         this.oninit = oninit;
+    }
 
+    start() {
         this.#init();
     }
 
@@ -84,6 +86,9 @@ export class Paperclips {
 
         gl.enable(gl.CULL_FACE);
         gl.enable(gl.DEPTH_TEST);
+
+        gl.clearColor(1, 1, 1, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         gl.uniformMatrix4fv(this.tubeLocations.uViewMatrix, false, this.camera.matrices.view);
         gl.uniformMatrix4fv(this.tubeLocations.uProjectionMatrix, false, this.camera.matrices.projection);
@@ -228,7 +233,7 @@ export class Paperclips {
                 // calculate the force from the ray direction
                 const force = vec3.subtract(vec3.create(), rayEndWorldPos, rayStartWorldPos);
                 vec3.normalize(force, force);
-                vec3.scale(force, force, this.scaleFactor * 1.5);
+                vec3.scale(force, force, Math.max(3, this.scaleFactor * 1.5));
                 
                 this.physics.applyImpulse(result.body, position, force);
 

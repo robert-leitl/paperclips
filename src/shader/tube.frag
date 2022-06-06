@@ -16,7 +16,7 @@ void main() {
 
     vec3 P = vWorldPosition;
     vec3 N = normalize(vWorldNormal);
-    vec3 V = normalize(uCameraPosition - P);
+    vec3 V = normalize(P - uCameraPosition);
     vec3 L = normalize(lightDirection);
     vec3 H = normalize(V + N);
     float NdL = max(0., dot(N, L));
@@ -25,18 +25,18 @@ void main() {
     float specular = pow(max(0., max(0., dot(H, L))), 100.);
 
     // diffuse term
-    float diffuse = NdL;
+    float diffuse = NdL * 0.9;
 
     // ambient light color
     vec4 ambient = vec4(0.1);
     
     // the material albedo color
-    vec4 albedo = vec4(0.);
+    vec4 albedo = vec4(0.1);
 
     // fake occlusion
     float occlusionFactor = smoothstep(0., .4, vWorldPosition.y) * 0.3 + 0.7;
 
-    outColor = albedo + ambient + lightColor * diffuse + vec4(specular);
+    outColor = albedo + ambient + lightColor * diffuse + vec4(specular * 0.5);
 
     outColor *= occlusionFactor;
 }

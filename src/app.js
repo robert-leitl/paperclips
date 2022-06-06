@@ -18,6 +18,7 @@ let resizeTimeoutId;
 
 window.addEventListener('load', () => {
     const canvas = document.body.querySelector('#c');
+    const startButton = document.getElementById('start-button');
 
     let pane;
     if (DEBUG) {
@@ -28,6 +29,11 @@ window.addEventListener('load', () => {
     sketch = new Paperclips(canvas, pane, (sketch) => {
         sketch.run(); 
     });
+
+    startButton.onclick = () => {
+        startButton.style.display = 'none';
+        sketch.start();
+    }
 });
 
 window.addEventListener('resize', () => {
