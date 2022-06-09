@@ -1,12 +1,15 @@
 import { mat4, quat, vec2, vec3, vec4 } from 'gl-matrix';
 import { GLBBuilder } from './utils/glb-builder';
 import { createAndSetupTexture, createFramebuffer, createProgram, makeBuffer, makeVertexArray, resizeCanvasToDisplaySize, setFramebuffer } from './utils/webgl-utils';
+import { PaperclipsPhysics } from './paperclips-physics';
+import { PaperclipsAudio } from './paperclips-audio';
 
 import tubeVertShaderSource from './shader/tube.vert';
 import tubeFragShaderSource from './shader/tube.frag';
-import { ArcballControl } from './utils/arcball-control';
-import { PaperclipsPhysics } from './paperclips-physics';
-import { PaperclipsAudio } from './paperclips-audio';
+import blurVertShaderSource from './shader/blur.vert';
+import blurFragShaderSource from './shader/blur.frag';
+import impulseEffectsVertShaderSource from './shader/impulse-effects.vert';
+import impulseEffectsFragShaderSource from './shader/impulse-effects.frag';
 
 export class Paperclips {
     oninit;
@@ -33,6 +36,13 @@ export class Paperclips {
 
     DEFAULT_TUBE_SCALE = 3;
     TUBE_COUNT = 3;
+
+    blurScale = 4;
+
+    IMPULSE_BUFFER_SIZE = 5;
+    impulseBuffer = [];
+    impulseBufferPointer = 0;
+    IMPULSE_DURATION = 1000;
 
     constructor(canvas, pane, oninit = null) {
         this.canvas = canvas;
@@ -66,8 +76,7 @@ export class Paperclips {
         // update physics and apply motion states
         this.bodyMatrices = this.physics.update(this.#deltaTime);
 
-        if (this.animate)
-            this.#frames += this.#deltaTime / 16;
+        this.#frames += this.#deltaTime / 16;
 
         if (this.#isDestroyed) return;
 
@@ -79,6 +88,23 @@ export class Paperclips {
     }
 
     #render() {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        setFramebuffer(gl, this.tubesFBO, this.drawBufferSize[0], this.drawBufferSize[1]);
+        this.#tubesPass();
+
+        setFramebuffer(gl, this.hBlurFBO, this.drawBufferSize[0], this.drawBufferSize[1]);
+        this.#blurPass(this.tubesColorTexture, this.tubesDepthTexture);
+
+        setFramebuffer(gl, this.vBlurFBO, this.drawBufferSize[0], this.drawBufferSize[1]);
+        this.#blurPass(this.hBlurTexture, this.tubesDepthTexture, true);
+
+        setFramebuffer(gl, null, this.drawBufferSize[0], this.drawBufferSize[1]);
+        this.#impulseEffectsPass(this.vBlurTexture);
+    }
+
+    #tubesPass() {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
@@ -94,6 +120,7 @@ export class Paperclips {
         gl.uniformMatrix4fv(this.tubeLocations.uProjectionMatrix, false, this.camera.matrices.projection);
         gl.uniform3f(this.tubeLocations.uCameraPosition, this.camera.position[0], this.camera.position[1], this.camera.position[2]);
         gl.uniform1f(this.tubeLocations.uFrames, this.#frames);
+        gl.uniform1f(this.tubeLocations.uScaleFactor, this.scaleFactor);
         gl.bindVertexArray(this.tubeVAO);
         this.bodyMatrices.forEach(matrix => this.#renderTube(matrix));
     }
@@ -109,6 +136,54 @@ export class Paperclips {
         gl.uniformMatrix4fv(this.tubeLocations.uWorldMatrix, false, matrix);
         gl.uniformMatrix4fv(this.tubeLocations.uWorldInverseTransposeMatrix, false, worldInverseTranspose);
         gl.drawElements(gl.TRIANGLES, this.tubeBuffers.indices.length, gl.UNSIGNED_SHORT, 0);
+    }
+
+    #blurPass(inColorTexture, inDepthTexture, vertical = false) {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        gl.useProgram(this.blurProgram);
+        gl.clearColor(1, 1, 1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, inColorTexture);
+        gl.uniform1i(this.blurLocations.uColorTexture, 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, inDepthTexture);
+        gl.uniform1i(this.blurLocations.uDepthTexture, 1);
+        if (vertical)
+            gl.uniform2f(this.blurLocations.uDirection, 0, 1);
+        else
+            gl.uniform2f(this.blurLocations.uDirection, 1, 0);
+
+        gl.uniform1f(this.blurLocations.uScale, this.blurScale);
+        gl.uniformMatrix4fv(this.blurLocations.uInverseProjectionMatrix, false, this.camera.matrices.inversProjection);
+        gl.uniform1f(this.blurLocations.uScaleFactor, this.scaleFactor);
+        gl.bindVertexArray(this.quadVAO);
+        gl.drawArrays(gl.TRIANGLES, 0, this.quadBuffers.numElem);
+    }
+
+    #impulseEffectsPass(inTexture) {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        gl.useProgram(this.impulseEffectsProgram);
+        gl.clearColor(1, 1, 1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, inTexture);
+        gl.uniform1i(this.impulseEffectsLocations.uColorTexture, 0);
+        gl.uniform1f(this.impulseEffectsLocations.uFrames, this.#frames);
+
+        this.impulseBuffer.forEach((data, ndx) => 
+            gl.uniform4fv(
+                this.impulseEffectsLocations.uImpulseBuffer[ndx], 
+                new Float32Array([data.x, data.y, Math.min(1., (this.#time - data.startTime) / this.IMPULSE_DURATION), 0])
+            )
+        );
+
+        gl.bindVertexArray(this.quadVAO);
+        gl.drawArrays(gl.TRIANGLES, 0, this.quadBuffers.numElem);
     }
 
     destroy() {
@@ -148,6 +223,7 @@ export class Paperclips {
         // get the places of the bounds of physics world
         const boundY = Math.tan(this.camera.fov / 2) * (-this.camera.position[1] + 1);
         const boundX = boundY * (gl.canvas.clientWidth / gl.canvas.clientHeight);
+        this.maxBound = Math.max(boundX, boundY);
         await this.physics.init(this.TUBE_COUNT, this.scaleFactor, boundX, boundY);
 
         ///////////////////////////////////  AUDIO INITIALIZATION
@@ -159,6 +235,8 @@ export class Paperclips {
 
         // setup programs
         this.tubeProgram = createProgram(gl, [tubeVertShaderSource, tubeFragShaderSource], null, { aModelPosition: 0, aModelNormal: 1 });
+        this.blurProgram = createProgram(gl, [blurVertShaderSource, blurFragShaderSource], null, { aModelPosition: 0 });
+        this.impulseEffectsProgram = createProgram(gl, [impulseEffectsVertShaderSource, impulseEffectsFragShaderSource], null, { aModelPosition: 0 });
 
         // find the locations
         this.tubeLocations = {
@@ -169,8 +247,30 @@ export class Paperclips {
             uProjectionMatrix: gl.getUniformLocation(this.tubeProgram, 'uProjectionMatrix'),
             uWorldInverseTransposeMatrix: gl.getUniformLocation(this.tubeProgram, 'uWorldInverseTransposeMatrix'),
             uCameraPosition: gl.getUniformLocation(this.tubeProgram, 'uCameraPosition'),
-            uFrames: gl.getUniformLocation(this.tubeProgram, 'uFrames')
+            uFrames: gl.getUniformLocation(this.tubeProgram, 'uFrames'),
+            uScaleFactor: gl.getUniformLocation(this.tubeProgram, 'uScaleFactor')
         };
+        this.blurLocations = {
+            aModelPosition: gl.getAttribLocation(this.blurProgram, 'aModelPosition'),
+            uColorTexture: gl.getUniformLocation(this.blurProgram, 'uColorTexture'),
+            uDepthTexture: gl.getUniformLocation(this.blurProgram, 'uDepthTexture'),
+            uInverseProjectionMatrix: gl.getUniformLocation(this.blurProgram, 'uInverseProjectionMatrix'),
+            uScale: gl.getUniformLocation(this.blurProgram, 'uScale'),
+            uDirection: gl.getUniformLocation(this.blurProgram, 'uDirection'),
+            uScaleFactor: gl.getUniformLocation(this.blurProgram, 'uScaleFactor')
+        };
+        this.impulseEffectsLocations = {
+            aModelPosition: gl.getAttribLocation(this.impulseEffectsProgram, 'aModelPosition'),
+            uColorTexture: gl.getUniformLocation(this.impulseEffectsProgram, 'uColorTexture'),
+            uFrames: gl.getUniformLocation(this.impulseEffectsProgram, 'uFrames'),
+            uImpulseBuffer: []
+        };
+        for(let j=0; j<this.IMPULSE_BUFFER_SIZE; ++j) {
+            this.impulseBuffer.push({ x: -10, y: -10, startTime: 0 });
+            this.impulseEffectsLocations.uImpulseBuffer.push(
+                gl.getUniformLocation(this.impulseEffectsProgram, `uImpulseBuffer[${j}]`)
+            )
+        }
     
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
@@ -192,8 +292,20 @@ export class Paperclips {
 
         /////////////////////////////////// FRAMEBUFFER SETUP
 
-        // init the pointer rotate control
-        //this.control = new ArcballControl(this.canvas);
+        // init the plant framebuffer and its textures
+        this.tubesColorTexture = this.#initFBOTexture(gl, gl.RGBA, clientSize, gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+        this.tubesDepthTexture = this.#initFBOTexture(gl, gl.DEPTH_COMPONENT32F, clientSize, gl.NEAREST, gl.NEAREST, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+        this.tubesFBO = createFramebuffer(gl, [this.tubesColorTexture], this.tubesDepthTexture);
+
+        // init the blur framebuffer and textures
+        this.hBlurTexture = this.#initFBOTexture(gl, gl.RGBA, clientSize, gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+        this.vBlurTexture = this.#initFBOTexture(gl, gl.RGBA, clientSize, gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+        this.hBlurFBO = createFramebuffer(gl, [this.hBlurTexture]);
+        this.vBlurFBO = createFramebuffer(gl, [this.vBlurTexture]);
+
+        // init impulse effects framebuffer and texture
+        this.impulseEffectsTexture = this.#initFBOTexture(gl, gl.RGBA, clientSize, gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+        this.impulseEffectsFBO = createFramebuffer(gl, [this.impulseEffectsTexture]);
 
         this.resize();
 
@@ -237,6 +349,7 @@ export class Paperclips {
                 const y = (1 - (screenY / this.canvas.clientHeight)) * 2 - 1;
                 const force = vec3.fromValues(-1 * x, 2, -1 * y);
                 vec3.normalize(force, force);*/
+
                 // calculate the force from the ray direction
                 const force = vec3.scale(vec3.create(), d, Math.max(3, this.scaleFactor * 1.5));
                 
@@ -254,15 +367,26 @@ export class Paperclips {
                 const modelMatrix = this.bodyMatrices[i];
                 const modelPosition = vec3.fromValues(modelMatrix[12], modelMatrix[13], modelMatrix[14]);
                 const iM = vec3.subtract(vec3.create(), modelPosition, intersection);
-                const forceValue = Math.max(0, 5 / (vec3.length(iM) + 0.01));
-                console.log(forceValue);
+                const forceValue = Math.max(0, this.maxBound / (vec3.length(iM) + 0.01));
                 const force = vec3.scale(vec3.create(), vec3.normalize(iM, iM), forceValue * this.scaleFactor);
                 
                 this.physics.applyImpulse(this.physics.tubeBodies[i], vec3.create(), force);
             }
             
             this.audio.playImpulseSound();
+
+            this.#addImpulseBufferEntry(
+                (e.clientX / this.canvas.clientWidth),
+                (1 - (e.clientY / this.canvas.clientHeight))
+            );
         }); 
+    }
+
+    #addImpulseBufferEntry(x, y) {
+        this.impulseBuffer[this.impulseBufferPointer] = {
+            x, y, startTime: this.#time
+        }
+        this.impulseBufferPointer = (this.impulseBufferPointer + 1) % this.IMPULSE_BUFFER_SIZE;
     }
 
     screenToWorldPosition(screenX, screenY, z) {
@@ -278,15 +402,30 @@ export class Paperclips {
         return worldPos;
     }
 
+    #initFBOTexture(gl, format, size, minFilter, magFilter, wrapS, wrapT) {
+        const texture = createAndSetupTexture(gl, minFilter, magFilter, wrapS, wrapT);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        
+        if (format === gl.RGBA)
+            gl.texImage2D(gl.TEXTURE_2D, 0, format, size[0], size[1], 0, format, gl.UNSIGNED_BYTE, null);
+        else if (format === gl.DEPTH_COMPONENT32F) 
+            gl.texImage2D(gl.TEXTURE_2D, 0, format, size[0], size[1], 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
+        else if(format === gl.RGBA16F)
+            gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, size[0], size[1]);
+
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        return texture;
+    }
+
     #resizeTextures(gl) {
-        const clientSize = vec2.fromValues(gl.canvas.clientWidth, gl.canvas.clientHeight);
+        const clientSize = vec2.fromValues(gl.canvas.width, gl.canvas.height);
         this.drawBufferSize = vec2.clone(clientSize);
         
-        /*this.#resizeTexture(gl, this.plantColorTexture, gl.RGBA, clientSize);
-        this.#resizeTexture(gl, this.plantDepthTexture, gl.DEPTH_COMPONENT32F, clientSize);
-        this.#resizeTexture(gl, this.deltaDepthColorTexture, gl.RGBA, clientSize);
+        this.#resizeTexture(gl, this.tubesColorTexture, gl.RGBA, clientSize);
+        this.#resizeTexture(gl, this.tubesDepthTexture, gl.DEPTH_COMPONENT32F, clientSize);
         this.#resizeTexture(gl, this.hBlurTexture, gl.RGBA, clientSize);
-        this.#resizeTexture(gl, this.vBlurTexture, gl.RGBA, clientSize);*/
+        this.#resizeTexture(gl, this.vBlurTexture, gl.RGBA, clientSize);
+        this.#resizeTexture(gl, this.impulseEffectsTexture, gl.RGBA, clientSize);
 
         // reset bindings
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);

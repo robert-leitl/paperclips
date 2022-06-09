@@ -1,5 +1,3 @@
-import { Pane } from 'tweakpane';
-import * as EssentialsPlugin from '@tweakpane/plugin-essentials';
 import { Paperclips } from './paperclips';
 
 const queryString = window.location.search;
@@ -20,13 +18,13 @@ window.addEventListener('load', () => {
     const canvas = document.body.querySelector('#c');
     const startButton = document.getElementById('start-button');
 
-    let pane;
+    /*let pane;
     if (DEBUG) {
         pane = new Pane({ title: 'Settings', expanded: false});
         pane.registerPlugin(EssentialsPlugin);
-    }
+    }*/
 
-    sketch = new Paperclips(canvas, pane, (sketch) => {
+    sketch = new Paperclips(canvas, null, (sketch) => {
         sketch.run(); 
     });
 
