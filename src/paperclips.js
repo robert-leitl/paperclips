@@ -37,7 +37,7 @@ export class Paperclips {
     DEFAULT_TUBE_SCALE = 3;
     TUBE_COUNT = 3;
 
-    blurScale = 4;
+    blurScale = 2;
 
     IMPULSE_BUFFER_SIZE = 5;
     impulseBuffer = [];
@@ -113,7 +113,7 @@ export class Paperclips {
         gl.enable(gl.CULL_FACE);
         gl.enable(gl.DEPTH_TEST);
 
-        gl.clearColor(1, 1, .25, 0);
+        gl.clearColor(1, 1, .20, 0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         gl.uniformMatrix4fv(this.tubeLocations.uViewMatrix, false, this.camera.matrices.view);

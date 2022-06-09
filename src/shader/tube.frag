@@ -29,7 +29,7 @@ void main() {
     float diffuse = NdL;
 
     // ambient light color
-    vec4 ambient = vec4(1., 1., 0.25, 1.);
+    vec4 ambient = vec4(1., 1., 0.20, 1.);
     
     // the material albedo color
     vec4 albedo = vec4(0., 0., 0., 1.);
