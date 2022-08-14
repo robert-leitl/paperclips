@@ -41,12 +41,16 @@ export class PaperclipsAudio {
         setTimeout(() => Tone.Transport.start(), 100);
     }
 
+    prevTransportTime = 0;
+
     playFrontPlaneCollisionSound(strength) {
-        if (this.muteCollisionSoundTimeoutId) return;
+        if (this.muteCollisionSoundTimeoutId || Tone.Transport.now() === this.prevTransportTime) return;
 
         const volume = Math.min(strength, 25) - 45;
         this.frontPlaneCollisionSound.volume.value = volume;
+        
         this.frontPlaneCollisionSound.triggerAttackRelease('C4', '8n', Tone.Transport.now());
+        this.prevTransportTime = Tone.Transport.now();
     }
 
     playImpulseSound() {
