@@ -194,7 +194,7 @@ export class Paperclips {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
         // the scale factor adapt physics and graphic properties to the screen size
-        this.scaleFactor = Math.max(Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.75), 2);
+        this.scaleFactor = Math.max(Math.min(Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 250, 4.), 2);
 
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
@@ -224,7 +224,7 @@ export class Paperclips {
         const boundY = Math.tan(this.camera.fov / 2) * (-this.camera.position[1] + 1);
         const boundX = boundY * (gl.canvas.clientWidth / gl.canvas.clientHeight);
         this.maxBound = Math.max(boundX, boundY);
-        await this.physics.init(this.TUBE_COUNT, this.scaleFactor, boundX, boundY);
+        await this.physics.init(this.TUBE_COUNT, this.scaleFactor, boundX * 1.5, boundY * 1.5);
 
         ///////////////////////////////////  AUDIO INITIALIZATION
 
